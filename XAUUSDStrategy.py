@@ -1,28 +1,26 @@
-# XAUUSD Mean Reversion Strategy for TradeLocker
-# v6.0 - Simple mean reversion with strict limits
+# XAUUSD Scalping Strategy for TradeLocker
+# v7.0 - Quick exits, high win rate focus
 
 import backtrader as bt
 
 
 class XAUUSDStrategy(bt.Strategy):
     params = {
-        # Account
-        "account_size": 2500,
-        "max_trades_per_day": 2,
-        
         # Position Size
         "fixed_lots": 0.03,
         
         # Indicators
-        "sma_period": 20,
-        "rsi_period": 14,
-        "rsi_oversold": 30,
-        "rsi_overbought": 70,
+        "ema_fast": 8,
+        "ema_slow": 21,
+        "rsi_period": 7,               # Faster RSI
         "atr_period": 14,
         
-        # Exits
-        "sl_atr_mult": 2.0,
-        "tp_atr_mult": 1.5,            # Smaller TP for faster wins
+        # Quick Exits
+        "sl_atr_mult": 1.0,            # Tight stop
+        "tp_atr_mult": 0.8,            # Even tighter TP (<1:1 R:R but higher WR)
+        
+        # Filters
+        "max_trades_per_day": 2,
     }
 
     def __init__(self) -> None:
@@ -39,7 +37,8 @@ class XAUUSDStrategy(bt.Strategy):
         self.high_price = self.datas[0].high
         self.low_price = self.datas[0].low
         
-        self.sma = bt.indicators.SMA(self.datas[0], period=self.params.sma_period)
+        self.ema_fast = bt.indicators.EMA(self.datas[0], period=self.params.ema_fast)
+        self.ema_slow = bt.indicators.EMA(self.datas[0], period=self.params.ema_slow)
         self.rsi = bt.indicators.RSI(self.datas[0], period=self.params.rsi_period)
         self.atr = bt.indicators.ATR(self.datas[0], period=self.params.atr_period)
 
@@ -52,7 +51,7 @@ class XAUUSDStrategy(bt.Strategy):
         if self.order:
             return
         
-        if len(self.datas[0]) < 30:
+        if len(self.datas[0]) < 25:
             return
         
         if self.daily_trades >= self.params.max_trades_per_day:
@@ -61,7 +60,8 @@ class XAUUSDStrategy(bt.Strategy):
         close = self.close_price[0]
         high = self.high_price[0]
         low = self.low_price[0]
-        sma = self.sma[0]
+        ema_fast = self.ema_fast[0]
+        ema_slow = self.ema_slow[0]
         rsi = self.rsi[0]
         atr = self.atr[0]
         
@@ -78,36 +78,30 @@ class XAUUSDStrategy(bt.Strategy):
         sl_dist = atr * self.params.sl_atr_mult
         tp_dist = atr * self.params.tp_atr_mult
         
-        # LONG: Price below SMA + RSI oversold (mean reversion setup)
-        if close < sma and rsi < self.params.rsi_oversold:
+        # LONG: Fast EMA > Slow EMA (uptrend) + RSI < 45 (not overbought)
+        if ema_fast > ema_slow and rsi < 45:
             self.stop_loss = close - sl_dist
             self.take_profit = close + tp_dist
             self.order = self.buy(size=self.params.fixed_lots)
             self.daily_trades += 1
-            self.log(f"LONG {close:.2f} RSI:{rsi:.1f}")
         
-        # SHORT: Price above SMA + RSI overbought
-        elif close > sma and rsi > self.params.rsi_overbought:
+        # SHORT: Fast EMA < Slow EMA (downtrend) + RSI > 55 (not oversold)
+        elif ema_fast < ema_slow and rsi > 55:
             self.stop_loss = close + sl_dist
             self.take_profit = close - tp_dist
             self.order = self.sell(size=self.params.fixed_lots)
             self.daily_trades += 1
-            self.log(f"SHORT {close:.2f} RSI:{rsi:.1f}")
 
     def notify_order(self, order):
-        if order.status == order.Completed:
-            self.log(f"EXEC {order.executed.price:.2f}")
         self.order = None
 
     def notify_trade(self, trade):
         if trade.isclosed:
-            pnl = trade.pnl
-            self.total_pnl += pnl
-            if pnl > 0:
+            self.total_pnl += trade.pnl
+            if trade.pnl > 0:
                 self.wins += 1
             else:
                 self.losses += 1
-            self.log(f"PnL: ${pnl:.2f}")
             self.stop_loss = None
             self.take_profit = None
 
@@ -117,8 +111,6 @@ class XAUUSDStrategy(bt.Strategy):
         self.log(f"=== ${self.total_pnl:.2f} | {wr:.0f}% WR ({self.wins}W/{self.losses}L) ===")
 
     params_metadata = {
-        "rsi_oversold": {"label": "RSI Oversold", "value_type": "int"},
-        "rsi_overbought": {"label": "RSI Overbought", "value_type": "int"},
         "sl_atr_mult": {"label": "SL (ATR x)", "value_type": "float"},
         "tp_atr_mult": {"label": "TP (ATR x)", "value_type": "float"},
     }
