@@ -1,29 +1,30 @@
 # XAUUSD EMA Crossover Strategy for TradeLocker
-# v4.0 - Ultra-Conservative for FundedHero Challenge (max 12% DD)
+# v5.0 - Trend-Filtered for FundedHero Challenge (target <12% DD)
 
 import backtrader as bt
 
 
 class XAUUSDStrategy(bt.Strategy):
     params = {
-        # Ultra-Conservative Risk Management
+        # Risk Management
         "account_size": 2500,
-        "risk_percent": 0.15,          # Only 0.15% per trade ($3.75)
-        "max_trades_per_day": 2,       # Reduced from 3
-        "max_daily_loss": 25,          # Stop if down $25/day (1%)
+        "max_trades_per_day": 1,       # Only 1 trade per day
+        "max_daily_loss": 20,          # $20 daily limit (0.8%)
         
-        # Fixed Small Position Size
-        "fixed_lots": 0.03,            # Fixed 0.03 lots (smallest allowed)
+        # Position Size
+        "fixed_lots": 0.03,
         "point_value": 100,
         
-        # Indicators (slower for fewer signals)
+        # Indicators
         "ema_fast": 12,
         "ema_slow": 26,
+        "adx_period": 14,
+        "adx_threshold": 25,           # Only trade when ADX > 25
         "atr_period": 14,
         
-        # Wide Exits (reduce whipsaws)
-        "sl_atr_mult": 3.0,            # 3x ATR stop
-        "tp_atr_mult": 5.0,            # 5x ATR target (1.67:1 R:R)
+        # Exits
+        "sl_atr_mult": 3.0,
+        "tp_atr_mult": 4.5,            # 1.5:1 R:R
     }
 
     def __init__(self) -> None:
@@ -44,10 +45,10 @@ class XAUUSDStrategy(bt.Strategy):
         self.ema_fast = bt.indicators.EMA(self.datas[0], period=self.params.ema_fast)
         self.ema_slow = bt.indicators.EMA(self.datas[0], period=self.params.ema_slow)
         self.ema_cross = bt.indicators.CrossOver(self.ema_fast, self.ema_slow)
+        self.adx = bt.indicators.ADX(self.datas[0], period=self.params.adx_period)
         self.atr = bt.indicators.ATR(self.datas[0], period=self.params.atr_period)
 
     def next(self) -> None:
-        # Daily reset
         current_dt = self.datas[0].datetime.date(0)
         if self.current_date != current_dt:
             self.current_date = current_dt
@@ -60,7 +61,6 @@ class XAUUSDStrategy(bt.Strategy):
         if len(self.datas[0]) < 30:
             return
         
-        # Daily loss limit
         if self.daily_pnl <= -self.params.max_daily_loss:
             return
         
@@ -71,6 +71,7 @@ class XAUUSDStrategy(bt.Strategy):
         high = self.high_price[0]
         low = self.low_price[0]
         atr = self.atr[0]
+        adx = self.adx[0]
         cross = self.ema_cross[0]
         
         # Manage position
@@ -83,24 +84,26 @@ class XAUUSDStrategy(bt.Strategy):
                     self.order = self.close()
             return
         
+        # TREND FILTER: Only trade when ADX > threshold
+        if adx < self.params.adx_threshold:
+            return
+        
         sl_dist = atr * self.params.sl_atr_mult
         lots = self.params.fixed_lots
         
-        # LONG on bullish crossover
         if cross > 0:
             self.stop_loss = close - sl_dist
             self.take_profit = close + (atr * self.params.tp_atr_mult)
             self.order = self.buy(size=lots)
             self.daily_trades += 1
-            self.log(f"LONG {close:.2f} SL:{self.stop_loss:.2f} TP:{self.take_profit:.2f}")
+            self.log(f"LONG {close:.2f} ADX:{adx:.1f}")
         
-        # SHORT on bearish crossover
         elif cross < 0:
             self.stop_loss = close + sl_dist
             self.take_profit = close - (atr * self.params.tp_atr_mult)
             self.order = self.sell(size=lots)
             self.daily_trades += 1
-            self.log(f"SHORT {close:.2f} SL:{self.stop_loss:.2f} TP:{self.take_profit:.2f}")
+            self.log(f"SHORT {close:.2f} ADX:{adx:.1f}")
 
     def notify_order(self, order):
         if order.status == order.Completed:
@@ -116,16 +119,17 @@ class XAUUSDStrategy(bt.Strategy):
                 self.wins += 1
             else:
                 self.losses += 1
-            self.log(f"PnL: ${pnl:.2f} Total: ${self.total_pnl:.2f}")
+            self.log(f"PnL: ${pnl:.2f}")
             self.stop_loss = None
             self.take_profit = None
 
     def stop(self):
-        self.log(f"=== Final: ${self.total_pnl:.2f} | {self.wins}W/{self.losses}L ===")
+        total = self.wins + self.losses
+        wr = (self.wins / total * 100) if total > 0 else 0
+        self.log(f"=== ${self.total_pnl:.2f} | {wr:.0f}% WR ({self.wins}W/{self.losses}L) ===")
 
     params_metadata = {
-        "fixed_lots": {"label": "Lot Size", "helper_text": "Fixed lots per trade", "value_type": "float"},
-        "max_daily_loss": {"label": "Max Daily Loss", "helper_text": "Stop trading if hit", "value_type": "float"},
+        "adx_threshold": {"label": "ADX Threshold", "helper_text": "Min ADX for trend", "value_type": "float"},
+        "max_trades_per_day": {"label": "Max Trades/Day", "value_type": "int"},
         "sl_atr_mult": {"label": "SL (ATR x)", "value_type": "float"},
-        "tp_atr_mult": {"label": "TP (ATR x)", "value_type": "float"},
     }
