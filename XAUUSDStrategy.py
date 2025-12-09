@@ -1,19 +1,19 @@
 # XAUUSD EMA Crossover Strategy for TradeLocker
-# v3.0 - Simple crossover with risk management
+# v3.1 - Optimized for FundedHero Challenge Compliance (max 12% drawdown)
 
 import backtrader as bt
 
 
 class XAUUSDStrategy(bt.Strategy):
     params = {
-        # Risk Management
+        # Risk Management (conservative for challenge)
         "account_size": 2500,
-        "risk_percent": 0.5,
+        "risk_percent": 0.4,           # Reduced from 0.5 to limit drawdown
         "max_trades_per_day": 3,
         
-        # Position Sizing
+        # Position Sizing (conservative)
         "min_lots": 0.03,
-        "max_lots": 0.08,
+        "max_lots": 0.05,              # Reduced from 0.08 for consistency
         "point_value": 100,
         
         # Indicators
@@ -21,9 +21,9 @@ class XAUUSDStrategy(bt.Strategy):
         "ema_slow": 21,
         "atr_period": 14,
         
-        # Exits
-        "sl_atr_mult": 2.0,
-        "tp_atr_mult": 3.0,
+        # Exits (wider for fewer stops)
+        "sl_atr_mult": 2.5,            # Increased from 2.0
+        "tp_atr_mult": 4.0,            # Increased from 3.0 (1.6:1 R:R)
     }
 
     def __init__(self) -> None:
