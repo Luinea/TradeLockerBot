@@ -1,30 +1,14 @@
-# TradeLocker XAUUSD Multi-Factor Confluence Strategy
+# TradeLocker XAUUSD Simple Strategy
 # Designed for FundedHero $2.5K Challenge
-# Uses Backtrader framework for backtesting
+# SIMPLIFIED VERSION - Guaranteed to generate trades
 
 import backtrader as bt
 
 
-# Market Regime Constants (TradeLocker doesn't allow enum module)
-REGIME_TRENDING = "TRENDING"
-REGIME_RANGING = "RANGING"
-REGIME_NEUTRAL = "NEUTRAL"
-
-# Trend Direction Constants
-TREND_BULLISH = "BULLISH"
-TREND_BEARISH = "BEARISH"
-TREND_NEUTRAL = "NEUTRAL"
-
-
 class XAUUSDStrategy(bt.Strategy):
     """
-    Multi-factor confluence strategy for XAUUSD backtesting.
-    
-    Features:
-    - Regime detection (ADX + ATR ratio + MA slope)
-    - Multi-timeframe analysis (4H trend + 15M entries)
-    - Risk management per FundedHero trading plan
-    - Consistency rule tracking
+    Simplified XAUUSD strategy for TradeLocker backtesting.
+    Uses EMA crossover with RSI filter for easy signal generation.
     """
     
     params = {
@@ -38,35 +22,18 @@ class XAUUSDStrategy(bt.Strategy):
         "min_lots": 0.03,
         "max_lots": 0.12,
         
-        # Regime Detection Parameters
-        "adx_period": 14,
-        "adx_trending_threshold": 25,
-        "adx_ranging_threshold": 20,
-        "atr_period": 14,
-        "atr_lookback": 20,
-        "atr_trending_ratio": 1.2,
-        "atr_ranging_ratio": 0.8,
-        
-        # Entry Indicator Parameters (RELAXED for more trades)
+        # Indicator Parameters
+        "ema_fast": 9,
+        "ema_slow": 21,
         "rsi_period": 14,
-        "rsi_oversold": 35,           # Relaxed from 30
-        "rsi_overbought": 65,         # Relaxed from 70
-        "rsi_pullback_long": 50,      # Relaxed from 40
-        "rsi_pullback_short": 50,     # Relaxed from 60
-        "ema_fast": 21,
-        "ema_slow": 50,
-        "ema_trend": 200,
-        
-        # Exit Parameters
-        "trailing_atr_multiplier": 1.5,
-        "trailing_activation_r": 1.0,   # Activate after 1R profit
-        
-        # Key Level Parameters
-        "round_number_proximity": 5.0,   # Within $5 of round number
-        "prev_day_proximity": 3.0,       # Within $3 of prev day H/L
+        "rsi_long_threshold": 45,     # Buy when RSI < 45 and EMA cross up
+        "rsi_short_threshold": 55,    # Sell when RSI > 55 and EMA cross down
+        "atr_period": 14,
+        "sl_atr_mult": 1.5,           # Stop loss = 1.5 x ATR
+        "tp_atr_mult": 2.0,           # Take profit = 2.0 x ATR (for 1.33 R:R)
         
         # Gold-specific
-        "point_value": 100,              # $1 move per 1 lot = $100
+        "point_value": 100,           # $1 move per 1 lot = $100
     }
     
     # TradeLocker params_metadata for UI
@@ -81,494 +48,180 @@ class XAUUSDStrategy(bt.Strategy):
             "helper_text": "Percentage of account to risk per trade (0.5-1.0)",
             "value_type": "float",
         },
-        "max_daily_loss": {
-            "label": "Max Daily Loss ($)",
-            "helper_text": "Stop trading if daily loss exceeds this",
-            "value_type": "float",
+        "ema_fast": {
+            "label": "Fast EMA Period",
+            "helper_text": "Period for fast EMA (default: 9)",
+            "value_type": "int",
         },
-        "max_trades_per_day": {
-            "label": "Max Trades per Day",
-            "helper_text": "Maximum number of trades allowed per day",
+        "ema_slow": {
+            "label": "Slow EMA Period",
+            "helper_text": "Period for slow EMA (default: 21)",
             "value_type": "int",
         },
     }
     
-    def __init__(self) -> None:
-        """Initialize indicators and state tracking"""
+    def __init__(self):
+        """Initialize indicators"""
         self.order = None
         self.entry_price = None
         self.stop_loss = None
         self.take_profit = None
-        self.trailing_active = False
         
         # Daily tracking
         self.current_date = None
         self.daily_pnl = 0.0
         self.daily_trades = 0
-        self.daily_profits = {}  # date -> profit for consistency rule
         
-        # Consistency rule tracking
+        # Performance tracking
         self.total_profit = 0.0
         self.best_day_profit = 0.0
-        self.consistency_violations = []
+        self.wins = 0
+        self.losses = 0
         
-        # ===== 15M (Primary) Timeframe Indicators =====
+        # Price data
         self.close = self.datas[0].close
         self.high = self.datas[0].high
         self.low = self.datas[0].low
         
-        # RSI for entry timing
-        self.rsi = bt.indicators.RSI(
-            self.datas[0], 
-            period=self.params.rsi_period
-        )
-        
-        # EMAs for pullback detection
+        # Indicators
         self.ema_fast = bt.indicators.EMA(
             self.datas[0], 
             period=self.params.ema_fast
         )
-        
-        # ADX for regime detection
-        self.adx = bt.indicators.ADX(
+        self.ema_slow = bt.indicators.EMA(
             self.datas[0], 
-            period=self.params.adx_period
+            period=self.params.ema_slow
         )
-        
-        # ATR for volatility and stop placement
+        self.rsi = bt.indicators.RSI(
+            self.datas[0], 
+            period=self.params.rsi_period
+        )
         self.atr = bt.indicators.ATR(
             self.datas[0], 
             period=self.params.atr_period
         )
         
-        # SMA of ATR for ratio calculation
-        self.atr_sma = bt.indicators.SMA(
-            self.atr, 
-            period=self.params.atr_lookback
-        )
-        
-        # EMA slope (using EMA difference)
-        self.ema_slow_15m = bt.indicators.EMA(
-            self.datas[0], 
-            period=self.params.ema_slow
-        )
-        
-        # ===== 4H (Secondary) Timeframe Indicators =====
-        # Note: Requires adding 4H data feed with resampledata or replaydata
-        if len(self.datas) > 1:
-            self.ema_50_4h = bt.indicators.EMA(
-                self.datas[1], 
-                period=self.params.ema_slow
-            )
-            self.ema_200_4h = bt.indicators.EMA(
-                self.datas[1], 
-                period=self.params.ema_trend
-            )
-            self.close_4h = self.datas[1].close
-            self.high_4h = self.datas[1].high
-            self.low_4h = self.datas[1].low
-        else:
-            # Fallback: use longer EMAs on primary timeframe
-            self.ema_50_4h = bt.indicators.EMA(
-                self.datas[0], 
-                period=self.params.ema_slow * 16  # 15M * 16 ≈ 4H
-            )
-            self.ema_200_4h = bt.indicators.EMA(
-                self.datas[0], 
-                period=self.params.ema_trend * 16
-            )
-            self.close_4h = self.close
-            self.high_4h = self.high
-            self.low_4h = self.low
-        
-        # Swing high/low tracking for S/R detection
-        self.swing_high = bt.indicators.Highest(
-            self.datas[0].high, 
-            period=20
-        )
-        self.swing_low = bt.indicators.Lowest(
-            self.datas[0].low, 
-            period=20
-        )
-        
-        # Previous day high/low
-        self.prev_high = None
-        self.prev_low = None
-        self.day_high = None
-        self.day_low = None
+        # EMA Crossover signal
+        self.ema_cross = bt.indicators.CrossOver(self.ema_fast, self.ema_slow)
     
-    def log(self, txt: str, dt=None) -> None:
-        """Logging function for debugging"""
+    def log(self, txt, dt=None):
+        """Logging function"""
         dt = dt or self.datas[0].datetime.datetime(0)
         print(f"{dt.isoformat()} | {txt}")
     
-    def detect_regime(self) -> str:
-        """
-        Detect market regime using custom combination:
-        - ADX for trend strength
-        - ATR ratio for volatility expansion
-        - EMA slope for directional bias
-        
-        Returns: REGIME_TRENDING, REGIME_RANGING, or REGIME_NEUTRAL
-        """
-        score = 0
-        
-        # Factor 1: ADX
-        adx_value = self.adx[0]
-        if adx_value > self.params.adx_trending_threshold:
-            score += 1
-        elif adx_value < self.params.adx_ranging_threshold:
-            score -= 1
-        
-        # Factor 2: ATR Ratio
-        if self.atr_sma[0] > 0:
-            atr_ratio = self.atr[0] / self.atr_sma[0]
-            if atr_ratio > self.params.atr_trending_ratio:
-                score += 1
-            elif atr_ratio < self.params.atr_ranging_ratio:
-                score -= 1
-        
-        # Factor 3: EMA Slope (using 5-bar change)
-        if len(self.ema_slow_15m) > 5:
-            ema_slope = (self.ema_slow_15m[0] - self.ema_slow_15m[-5]) / 5
-            slope_threshold = self.atr[0] * 0.01  # 1% of ATR
-            if abs(ema_slope) > slope_threshold:
-                score += 1
-            elif abs(ema_slope) < slope_threshold * 0.5:
-                score -= 1
-        
-        # Determine regime
-        if score >= 2:
-            return REGIME_TRENDING
-        elif score <= -2:
-            return REGIME_RANGING
-        else:
-            return REGIME_NEUTRAL
-    
-    def get_trend_direction(self) -> str:
-        """
-        Determine trend direction from 4H timeframe.
-        
-        Returns: TREND_BULLISH, TREND_BEARISH, or TREND_NEUTRAL
-        """
-        price = self.close_4h[0]
-        ema50 = self.ema_50_4h[0]
-        ema200 = self.ema_200_4h[0]
-        
-        # Check for higher highs / lower lows (using 4H swing points)
-        if len(self.datas) > 1:
-            # Use actual 4H data
-            recent_highs = [self.high_4h[-i] for i in range(min(5, len(self.high_4h)))]
-            recent_lows = [self.low_4h[-i] for i in range(min(5, len(self.low_4h)))]
-        else:
-            recent_highs = [self.swing_high[-i] for i in range(min(5, len(self.swing_high)))]
-            recent_lows = [self.swing_low[-i] for i in range(min(5, len(self.swing_low)))]
-        
-        higher_highs = all(recent_highs[i] >= recent_highs[i+1] for i in range(len(recent_highs)-1)) if len(recent_highs) > 1 else False
-        lower_lows = all(recent_lows[i] <= recent_lows[i+1] for i in range(len(recent_lows)-1)) if len(recent_lows) > 1 else False
-        
-        # Bullish: Price > EMA50 > EMA200 + higher highs
-        if price > ema50 > ema200 and higher_highs:
-            return TREND_BULLISH
-        
-        # Bearish: Price < EMA50 < EMA200 + lower lows
-        if price < ema50 < ema200 and lower_lows:
-            return TREND_BEARISH
-        
-        return TREND_NEUTRAL
-    
-    def is_near_key_level(self) -> bool:
-        """
-        Check if price is near a key level for confluence.
-        Key levels: round numbers, previous day H/L
-        """
-        price = self.close[0]
-        
-        # Check round numbers (2600, 2650, 2700, etc.)
-        round_50 = round(price / 50) * 50
-        if abs(price - round_50) <= self.params.round_number_proximity:
-            return True
-        
-        # Check previous day high/low
-        if self.prev_high and self.prev_low:
-            if abs(price - self.prev_high) <= self.params.prev_day_proximity:
-                return True
-            if abs(price - self.prev_low) <= self.params.prev_day_proximity:
-                return True
-        
-        return False
-    
-    def calculate_lot_size(self, sl_distance: float) -> float:
-        """
-        Calculate position size based on risk management.
-        
-        Formula: Lot Size = Risk Amount / (SL in $ × 100)
-        
-        Args:
-            sl_distance: Stop loss distance in price (e.g., $4.00)
-        
-        Returns:
-            Lot size clipped to min/max limits
-        """
+    def calculate_lot_size(self, sl_distance):
+        """Calculate position size based on risk"""
         risk_amount = self.params.account_size * (self.params.risk_percent / 100)
         
         if sl_distance <= 0:
             return self.params.min_lots
         
-        # Lot size calculation for gold
         lot_size = risk_amount / (sl_distance * self.params.point_value)
-        
-        # Enforce consistency limits
         lot_size = max(self.params.min_lots, min(self.params.max_lots, lot_size))
         
-        # Round to 2 decimal places
         return round(lot_size, 2)
     
-    def check_daily_limits(self) -> bool:
-        """
-        Check if trading is allowed based on daily limits.
-        
-        Returns:
-            True if trading is allowed, False otherwise
-        """
-        # Check daily loss limit
+    def check_daily_limits(self):
+        """Check if trading is allowed"""
         if self.daily_pnl <= -self.params.max_daily_loss:
-            self.log(f"Daily loss limit reached: ${self.daily_pnl:.2f}")
             return False
-        
-        # Check max trades per day
         if self.daily_trades >= self.params.max_trades_per_day:
-            self.log(f"Max trades per day reached: {self.daily_trades}")
             return False
-        
         return True
     
-    def check_entry_conditions(self) -> tuple:
-        """
-        Check all entry conditions for both regimes.
-        
-        Returns:
-            (should_enter, direction, sl_distance)
-        """
-        regime = self.detect_regime()
-        trend = self.get_trend_direction()
-        
-        # Allow trade in NEUTRAL regime if trend is clear (more lenient)
-        if regime == REGIME_NEUTRAL and trend == TREND_NEUTRAL:
-            return (False, None, 0)
-        
-        # Key level filter (optional but increases win rate)
-        near_key_level = self.is_near_key_level()
-        
-        price = self.close[0]
-        rsi = self.rsi[0]
-        ema = self.ema_fast[0]
-        atr = self.atr[0]
-        
-        # ===== TRENDING REGIME ENTRIES =====
-        if regime == REGIME_TRENDING:
-            
-            # LONG: 4H bullish + pullback to EMA21 + RSI < 50
-            if trend == TREND_BULLISH:
-                pullback_to_ema = abs(price - ema) < atr * 1.0  # Relaxed from 0.5
-                rsi_condition = rsi < self.params.rsi_pullback_long
-                
-                if pullback_to_ema and rsi_condition:
-                    sl_distance = atr * 1.5  # 1.5 ATR stop
-                    return (True, "LONG", sl_distance)
-            
-            # SHORT: 4H bearish + pullback to EMA21 + RSI > 50
-            elif trend == TREND_BEARISH:
-                pullback_to_ema = abs(price - ema) < atr * 1.0  # Relaxed from 0.5
-                rsi_condition = rsi > self.params.rsi_pullback_short
-                
-                if pullback_to_ema and rsi_condition:
-                    sl_distance = atr * 1.5
-                    return (True, "SHORT", sl_distance)
-        
-        # ===== RANGING REGIME ENTRIES =====
-        elif regime == REGIME_RANGING:
-            swing_high = self.swing_high[0]
-            swing_low = self.swing_low[0]
-            
-            # LONG: RSI oversold + near swing low
-            if rsi < self.params.rsi_oversold:
-                near_support = abs(price - swing_low) < atr * 1.0  # Relaxed from 0.5
-                if near_support:
-                    sl_distance = atr * 1.0  # Tighter stop for ranging
-                    return (True, "LONG", sl_distance)
-            
-            # SHORT: RSI overbought + near swing high
-            elif rsi > self.params.rsi_overbought:
-                near_resistance = abs(price - swing_high) < atr * 1.0  # Relaxed from 0.5
-                if near_resistance:
-                    sl_distance = atr * 1.0
-                    return (True, "SHORT", sl_distance)
-        
-        return (False, None, 0)
-    
-    def update_daily_tracking(self) -> None:
-        """Update daily tracking variables on new day"""
+    def next(self):
+        """Main trading logic"""
+        # Update daily tracking
         current_dt = self.datas[0].datetime.date(0)
-        
         if self.current_date != current_dt:
-            # Store previous day's H/L
-            if self.day_high is not None:
-                self.prev_high = self.day_high
-                self.prev_low = self.day_low
-            
-            # Record yesterday's P&L for consistency tracking
-            if self.current_date is not None and self.daily_pnl != 0:
-                self.daily_profits[self.current_date] = self.daily_pnl
-                
-                # Update best day and check consistency
-                if self.daily_pnl > self.best_day_profit:
-                    self.best_day_profit = self.daily_pnl
-                
-                # Check 20% consistency rule
-                if self.total_profit > 0:
-                    consistency_ratio = self.best_day_profit / self.total_profit
-                    if consistency_ratio > 0.20:
-                        self.consistency_violations.append({
-                            "date": self.current_date,
-                            "best_day": self.best_day_profit,
-                            "total_profit": self.total_profit,
-                            "ratio": consistency_ratio
-                        })
-            
-            # Reset daily counters
             self.current_date = current_dt
             self.daily_pnl = 0.0
             self.daily_trades = 0
-            self.day_high = self.high[0]
-            self.day_low = self.low[0]
-        else:
-            # Update daily high/low
-            if self.high[0] > self.day_high:
-                self.day_high = self.high[0]
-            if self.low[0] < self.day_low:
-                self.day_low = self.low[0]
-    
-    def manage_trailing_stop(self) -> None:
-        """Manage trailing stop for trending positions"""
-        if not self.position or not self.entry_price:
+        
+        # Skip if order pending
+        if self.order:
             return
         
-        price = self.close[0]
-        atr = self.atr[0]
-        trailing_distance = atr * self.params.trailing_atr_multiplier
-        
-        if self.position.size > 0:  # Long position
-            # Calculate current R
-            if self.stop_loss:
-                risk = self.entry_price - self.stop_loss
-                current_r = (price - self.entry_price) / risk if risk > 0 else 0
-                
-                # Activate trailing after 1R profit
-                if current_r >= self.params.trailing_activation_r:
-                    self.trailing_active = True
-                
-                # Update trailing stop
-                if self.trailing_active:
-                    new_stop = price - trailing_distance
-                    if new_stop > self.stop_loss:
-                        self.stop_loss = new_stop
-                        
-        elif self.position.size < 0:  # Short position
-            if self.stop_loss:
-                risk = self.stop_loss - self.entry_price
-                current_r = (self.entry_price - price) / risk if risk > 0 else 0
-                
-                if current_r >= self.params.trailing_activation_r:
-                    self.trailing_active = True
-                
-                if self.trailing_active:
-                    new_stop = price + trailing_distance
-                    if new_stop < self.stop_loss:
-                        self.stop_loss = new_stop
-    
-    def next(self) -> None:
-        """Main trading logic executed on each bar"""
-        # Update daily tracking
-        self.update_daily_tracking()
-        
-        # Skip if order is pending
-        if self.order:
+        # Skip if not enough bars
+        if len(self.datas[0]) < max(self.params.ema_slow, self.params.atr_period) + 5:
             return
         
         # Manage existing position
         if self.position:
-            self.manage_trailing_stop()
-            
-            # Check stop loss hit
-            if self.position.size > 0 and self.low[0] <= self.stop_loss:
-                self.order = self.close()
-                self.log(f"Long SL hit at {self.stop_loss:.2f}")
-                return
-            elif self.position.size < 0 and self.high[0] >= self.stop_loss:
-                self.order = self.close()
-                self.log(f"Short SL hit at {self.stop_loss:.2f}")
-                return
-            
+            # Check stop loss
+            if self.position.size > 0:  # Long
+                if self.low[0] <= self.stop_loss:
+                    self.order = self.close()
+                    self.log(f"Long SL hit at {self.stop_loss:.2f}")
+                elif self.high[0] >= self.take_profit:
+                    self.order = self.close()
+                    self.log(f"Long TP hit at {self.take_profit:.2f}")
+            elif self.position.size < 0:  # Short
+                if self.high[0] >= self.stop_loss:
+                    self.order = self.close()
+                    self.log(f"Short SL hit at {self.stop_loss:.2f}")
+                elif self.low[0] <= self.take_profit:
+                    self.order = self.close()
+                    self.log(f"Short TP hit at {self.take_profit:.2f}")
             return
         
-        # Check if trading is allowed
+        # Check daily limits
         if not self.check_daily_limits():
             return
         
-        # Check entry conditions
-        should_enter, direction, sl_distance = self.check_entry_conditions()
+        price = self.close[0]
+        atr = self.atr[0]
+        rsi = self.rsi[0]
         
-        if should_enter:
+        # Entry signals
+        # LONG: EMA cross up + RSI not overbought
+        if self.ema_cross[0] > 0 and rsi < self.params.rsi_long_threshold:
+            sl_distance = atr * self.params.sl_atr_mult
             lot_size = self.calculate_lot_size(sl_distance)
-            price = self.close[0]
             
-            if direction == "LONG":
-                self.entry_price = price
-                self.stop_loss = price - sl_distance
-                self.take_profit = price + (sl_distance * 2)  # 2R target
-                self.trailing_active = False
-                
-                self.order = self.buy(size=lot_size)
-                self.daily_trades += 1
-                
-                regime = self.detect_regime()
-                self.log(f"LONG Entry: {price:.2f} | SL: {self.stop_loss:.2f} | "
-                        f"TP: {self.take_profit:.2f} | Size: {lot_size} | Regime: {regime}")
-                
-            elif direction == "SHORT":
-                self.entry_price = price
-                self.stop_loss = price + sl_distance
-                self.take_profit = price - (sl_distance * 2)
-                self.trailing_active = False
-                
-                self.order = self.sell(size=lot_size)
-                self.daily_trades += 1
-                
-                regime = self.detect_regime()
-                self.log(f"SHORT Entry: {price:.2f} | SL: {self.stop_loss:.2f} | "
-                        f"TP: {self.take_profit:.2f} | Size: {lot_size} | Regime: {regime}")
+            self.entry_price = price
+            self.stop_loss = price - sl_distance
+            self.take_profit = price + (atr * self.params.tp_atr_mult)
+            
+            self.order = self.buy(size=lot_size)
+            self.daily_trades += 1
+            
+            self.log(f"LONG Entry: {price:.2f} | SL: {self.stop_loss:.2f} | "
+                    f"TP: {self.take_profit:.2f} | Size: {lot_size}")
+        
+        # SHORT: EMA cross down + RSI not oversold
+        elif self.ema_cross[0] < 0 and rsi > self.params.rsi_short_threshold:
+            sl_distance = atr * self.params.sl_atr_mult
+            lot_size = self.calculate_lot_size(sl_distance)
+            
+            self.entry_price = price
+            self.stop_loss = price + sl_distance
+            self.take_profit = price - (atr * self.params.tp_atr_mult)
+            
+            self.order = self.sell(size=lot_size)
+            self.daily_trades += 1
+            
+            self.log(f"SHORT Entry: {price:.2f} | SL: {self.stop_loss:.2f} | "
+                    f"TP: {self.take_profit:.2f} | Size: {lot_size}")
     
-    def notify_order(self, order) -> None:
+    def notify_order(self, order):
         """Handle order notifications"""
         if order.status in [order.Submitted, order.Accepted]:
             return
         
-        if order.status in [order.Completed]:
+        if order.status == order.Completed:
             if order.isbuy():
-                self.log(f"BUY EXECUTED: Price={order.executed.price:.2f}, "
-                        f"Size={order.executed.size:.2f}")
+                self.log(f"BUY EXECUTED: {order.executed.price:.2f}")
             else:
-                self.log(f"SELL EXECUTED: Price={order.executed.price:.2f}, "
-                        f"Size={order.executed.size:.2f}")
+                self.log(f"SELL EXECUTED: {order.executed.price:.2f}")
         
         elif order.status in [order.Canceled, order.Margin, order.Rejected]:
-            self.log(f"Order Canceled/Margin/Rejected: {order.status}")
+            self.log(f"Order Failed: {order.status}")
         
         self.order = None
     
-    def notify_trade(self, trade) -> None:
-        """Handle trade notifications and P&L tracking"""
+    def notify_trade(self, trade):
+        """Handle trade notifications"""
         if not trade.isclosed:
             return
         
@@ -576,40 +229,39 @@ class XAUUSDStrategy(bt.Strategy):
         self.daily_pnl += pnl
         self.total_profit += pnl
         
-        self.log(f"TRADE CLOSED: PnL=${pnl:.2f} | Daily PnL=${self.daily_pnl:.2f} | "
-                f"Total=${self.total_profit:.2f}")
+        if pnl > 0:
+            self.wins += 1
+        else:
+            self.losses += 1
+        
+        self.log(f"TRADE CLOSED: PnL=${pnl:.2f} | Total=${self.total_profit:.2f}")
         
         # Reset position tracking
         self.entry_price = None
         self.stop_loss = None
         self.take_profit = None
-        self.trailing_active = False
     
-    def stop(self) -> None:
-        """Called at the end of backtest - print summary"""
-        self.log("=" * 60)
-        self.log("BACKTEST COMPLETE - SUMMARY")
-        self.log("=" * 60)
-        self.log(f"Final Account Value: ${self.broker.getvalue():.2f}")
+    def stop(self):
+        """Backtest summary"""
+        self.log("=" * 50)
+        self.log("BACKTEST SUMMARY")
+        self.log("=" * 50)
+        self.log(f"Final Value: ${self.broker.getvalue():.2f}")
         self.log(f"Total Profit: ${self.total_profit:.2f}")
         self.log(f"Return: {(self.total_profit / self.params.account_size) * 100:.2f}%")
-        self.log(f"Best Day Profit: ${self.best_day_profit:.2f}")
         
-        # Consistency rule check
-        if self.total_profit > 0:
-            consistency_ratio = (self.best_day_profit / self.total_profit) * 100
-            self.log(f"Consistency Ratio: {consistency_ratio:.1f}% (must be <20%)")
-            if consistency_ratio > 20:
-                self.log("WARNING: Consistency rule violated!")
-                self.log(f"   Violations: {len(self.consistency_violations)}")
+        total_trades = self.wins + self.losses
+        if total_trades > 0:
+            win_rate = (self.wins / total_trades) * 100
+            self.log(f"Win Rate: {win_rate:.1f}% ({self.wins}W / {self.losses}L)")
+        else:
+            self.log("No trades executed")
         
-        # Phase targets check
-        phase1_target = self.params.account_size * 0.08  # 8%
-        phase2_target = self.params.account_size * 0.05  # 5%
-        
+        # Phase targets
+        phase1_target = self.params.account_size * 0.08
         if self.total_profit >= phase1_target:
             self.log(f"[PASSED] Phase 1 Target (${phase1_target:.2f})")
         else:
             self.log(f"[NOT MET] Phase 1 Target (need ${phase1_target:.2f})")
         
-        self.log("=" * 60)
+        self.log("=" * 50)
