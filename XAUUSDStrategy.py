@@ -1,5 +1,5 @@
 # XAUUSD Scalping Strategy for TradeLocker
-# v7.0 - Quick exits, high win rate focus
+# v8.0 - Ultra-selective with ADX trend filter
 
 import backtrader as bt
 
@@ -12,15 +12,17 @@ class XAUUSDStrategy(bt.Strategy):
         # Indicators
         "ema_fast": 8,
         "ema_slow": 21,
-        "rsi_period": 7,               # Faster RSI
+        "rsi_period": 7,
+        "adx_period": 14,
+        "adx_threshold": 20,           # Only trade when ADX > 20
         "atr_period": 14,
         
         # Quick Exits
-        "sl_atr_mult": 1.0,            # Tight stop
-        "tp_atr_mult": 0.8,            # Even tighter TP (<1:1 R:R but higher WR)
+        "sl_atr_mult": 1.0,
+        "tp_atr_mult": 0.8,
         
-        # Filters
-        "max_trades_per_day": 2,
+        # Ultra-selective
+        "max_trades_per_day": 1,       # Down from 2
     }
 
     def __init__(self) -> None:
@@ -40,6 +42,7 @@ class XAUUSDStrategy(bt.Strategy):
         self.ema_fast = bt.indicators.EMA(self.datas[0], period=self.params.ema_fast)
         self.ema_slow = bt.indicators.EMA(self.datas[0], period=self.params.ema_slow)
         self.rsi = bt.indicators.RSI(self.datas[0], period=self.params.rsi_period)
+        self.adx = bt.indicators.ADX(self.datas[0], period=self.params.adx_period)
         self.atr = bt.indicators.ATR(self.datas[0], period=self.params.atr_period)
 
     def next(self) -> None:
@@ -63,6 +66,7 @@ class XAUUSDStrategy(bt.Strategy):
         ema_fast = self.ema_fast[0]
         ema_slow = self.ema_slow[0]
         rsi = self.rsi[0]
+        adx = self.adx[0]
         atr = self.atr[0]
         
         # Manage position
@@ -75,17 +79,21 @@ class XAUUSDStrategy(bt.Strategy):
                     self.order = self.close()
             return
         
+        # ADX filter - only trade in trending markets
+        if adx < self.params.adx_threshold:
+            return
+        
         sl_dist = atr * self.params.sl_atr_mult
         tp_dist = atr * self.params.tp_atr_mult
         
-        # LONG: Fast EMA > Slow EMA (uptrend) + RSI < 45 (not overbought)
+        # LONG: EMA aligned bullish + RSI not overbought
         if ema_fast > ema_slow and rsi < 45:
             self.stop_loss = close - sl_dist
             self.take_profit = close + tp_dist
             self.order = self.buy(size=self.params.fixed_lots)
             self.daily_trades += 1
         
-        # SHORT: Fast EMA < Slow EMA (downtrend) + RSI > 55 (not oversold)
+        # SHORT: EMA aligned bearish + RSI not oversold
         elif ema_fast < ema_slow and rsi > 55:
             self.stop_loss = close + sl_dist
             self.take_profit = close - tp_dist
@@ -111,6 +119,6 @@ class XAUUSDStrategy(bt.Strategy):
         self.log(f"=== ${self.total_pnl:.2f} | {wr:.0f}% WR ({self.wins}W/{self.losses}L) ===")
 
     params_metadata = {
-        "sl_atr_mult": {"label": "SL (ATR x)", "value_type": "float"},
-        "tp_atr_mult": {"label": "TP (ATR x)", "value_type": "float"},
+        "adx_threshold": {"label": "ADX Threshold", "value_type": "float"},
+        "max_trades_per_day": {"label": "Max Trades/Day", "value_type": "int"},
     }
