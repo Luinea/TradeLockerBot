@@ -47,12 +47,12 @@ class XAUUSDStrategy(bt.Strategy):
         "atr_trending_ratio": 1.2,
         "atr_ranging_ratio": 0.8,
         
-        # Entry Indicator Parameters  
+        # Entry Indicator Parameters (RELAXED for more trades)
         "rsi_period": 14,
-        "rsi_oversold": 30,
-        "rsi_overbought": 70,
-        "rsi_pullback_long": 40,
-        "rsi_pullback_short": 60,
+        "rsi_oversold": 35,           # Relaxed from 30
+        "rsi_overbought": 65,         # Relaxed from 70
+        "rsi_pullback_long": 50,      # Relaxed from 40
+        "rsi_pullback_short": 50,     # Relaxed from 60
         "ema_fast": 21,
         "ema_slow": 50,
         "ema_trend": 200,
@@ -353,8 +353,8 @@ class XAUUSDStrategy(bt.Strategy):
         regime = self.detect_regime()
         trend = self.get_trend_direction()
         
-        # No trade in NEUTRAL regime or trend
-        if regime == REGIME_NEUTRAL or trend == TREND_NEUTRAL:
+        # Allow trade in NEUTRAL regime if trend is clear (more lenient)
+        if regime == REGIME_NEUTRAL and trend == TREND_NEUTRAL:
             return (False, None, 0)
         
         # Key level filter (optional but increases win rate)
@@ -368,18 +368,18 @@ class XAUUSDStrategy(bt.Strategy):
         # ===== TRENDING REGIME ENTRIES =====
         if regime == REGIME_TRENDING:
             
-            # LONG: 4H bullish + pullback to EMA21 + RSI < 40
+            # LONG: 4H bullish + pullback to EMA21 + RSI < 50
             if trend == TREND_BULLISH:
-                pullback_to_ema = abs(price - ema) < atr * 0.5
+                pullback_to_ema = abs(price - ema) < atr * 1.0  # Relaxed from 0.5
                 rsi_condition = rsi < self.params.rsi_pullback_long
                 
                 if pullback_to_ema and rsi_condition:
                     sl_distance = atr * 1.5  # 1.5 ATR stop
                     return (True, "LONG", sl_distance)
             
-            # SHORT: 4H bearish + pullback to EMA21 + RSI > 60
+            # SHORT: 4H bearish + pullback to EMA21 + RSI > 50
             elif trend == TREND_BEARISH:
-                pullback_to_ema = abs(price - ema) < atr * 0.5
+                pullback_to_ema = abs(price - ema) < atr * 1.0  # Relaxed from 0.5
                 rsi_condition = rsi > self.params.rsi_pullback_short
                 
                 if pullback_to_ema and rsi_condition:
@@ -393,14 +393,14 @@ class XAUUSDStrategy(bt.Strategy):
             
             # LONG: RSI oversold + near swing low
             if rsi < self.params.rsi_oversold:
-                near_support = abs(price - swing_low) < atr * 0.5
+                near_support = abs(price - swing_low) < atr * 1.0  # Relaxed from 0.5
                 if near_support:
                     sl_distance = atr * 1.0  # Tighter stop for ranging
                     return (True, "LONG", sl_distance)
             
             # SHORT: RSI overbought + near swing high
             elif rsi > self.params.rsi_overbought:
-                near_resistance = abs(price - swing_high) < atr * 0.5
+                near_resistance = abs(price - swing_high) < atr * 1.0  # Relaxed from 0.5
                 if near_resistance:
                     sl_distance = atr * 1.0
                     return (True, "SHORT", sl_distance)

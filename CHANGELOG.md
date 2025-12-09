@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - **TradeLocker Compatibility**: Removed `enum` module import which is not allowed by TradeLocker security policy
 - Replaced `MarketRegime` and `TrendDirection` Enum classes with string constants
 - Removed `datetime` module import (not needed)
+- Replaced emoji characters (⚠️, ✅, ❌) with ASCII text for encoding compatibility
 
 ## [1.0.0] - 2025-12-09
 
