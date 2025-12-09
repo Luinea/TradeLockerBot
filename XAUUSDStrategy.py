@@ -3,22 +3,17 @@
 # Uses Backtrader framework for backtesting
 
 import backtrader as bt
-from datetime import datetime, time
-from enum import Enum
 
 
-class MarketRegime(Enum):
-    """Market regime classification"""
-    TRENDING = "TRENDING"
-    RANGING = "RANGING"
-    NEUTRAL = "NEUTRAL"
+# Market Regime Constants (TradeLocker doesn't allow enum module)
+REGIME_TRENDING = "TRENDING"
+REGIME_RANGING = "RANGING"
+REGIME_NEUTRAL = "NEUTRAL"
 
-
-class TrendDirection(Enum):
-    """Trend direction from higher timeframe"""
-    BULLISH = "BULLISH"
-    BEARISH = "BEARISH"
-    NEUTRAL = "NEUTRAL"
+# Trend Direction Constants
+TREND_BULLISH = "BULLISH"
+TREND_BEARISH = "BEARISH"
+TREND_NEUTRAL = "NEUTRAL"
 
 
 class XAUUSDStrategy(bt.Strategy):
@@ -207,14 +202,14 @@ class XAUUSDStrategy(bt.Strategy):
         dt = dt or self.datas[0].datetime.datetime(0)
         print(f"{dt.isoformat()} | {txt}")
     
-    def detect_regime(self) -> MarketRegime:
+    def detect_regime(self) -> str:
         """
         Detect market regime using custom combination:
         - ADX for trend strength
         - ATR ratio for volatility expansion
         - EMA slope for directional bias
         
-        Returns: MarketRegime enum
+        Returns: REGIME_TRENDING, REGIME_RANGING, or REGIME_NEUTRAL
         """
         score = 0
         
@@ -244,17 +239,17 @@ class XAUUSDStrategy(bt.Strategy):
         
         # Determine regime
         if score >= 2:
-            return MarketRegime.TRENDING
+            return REGIME_TRENDING
         elif score <= -2:
-            return MarketRegime.RANGING
+            return REGIME_RANGING
         else:
-            return MarketRegime.NEUTRAL
+            return REGIME_NEUTRAL
     
-    def get_trend_direction(self) -> TrendDirection:
+    def get_trend_direction(self) -> str:
         """
         Determine trend direction from 4H timeframe.
         
-        Returns: TrendDirection enum
+        Returns: TREND_BULLISH, TREND_BEARISH, or TREND_NEUTRAL
         """
         price = self.close_4h[0]
         ema50 = self.ema_50_4h[0]
@@ -274,13 +269,13 @@ class XAUUSDStrategy(bt.Strategy):
         
         # Bullish: Price > EMA50 > EMA200 + higher highs
         if price > ema50 > ema200 and higher_highs:
-            return TrendDirection.BULLISH
+            return TREND_BULLISH
         
         # Bearish: Price < EMA50 < EMA200 + lower lows
         if price < ema50 < ema200 and lower_lows:
-            return TrendDirection.BEARISH
+            return TREND_BEARISH
         
-        return TrendDirection.NEUTRAL
+        return TREND_NEUTRAL
     
     def is_near_key_level(self) -> bool:
         """
@@ -359,7 +354,7 @@ class XAUUSDStrategy(bt.Strategy):
         trend = self.get_trend_direction()
         
         # No trade in NEUTRAL regime or trend
-        if regime == MarketRegime.NEUTRAL or trend == TrendDirection.NEUTRAL:
+        if regime == REGIME_NEUTRAL or trend == TREND_NEUTRAL:
             return (False, None, 0)
         
         # Key level filter (optional but increases win rate)
@@ -371,10 +366,10 @@ class XAUUSDStrategy(bt.Strategy):
         atr = self.atr[0]
         
         # ===== TRENDING REGIME ENTRIES =====
-        if regime == MarketRegime.TRENDING:
+        if regime == REGIME_TRENDING:
             
             # LONG: 4H bullish + pullback to EMA21 + RSI < 40
-            if trend == TrendDirection.BULLISH:
+            if trend == TREND_BULLISH:
                 pullback_to_ema = abs(price - ema) < atr * 0.5
                 rsi_condition = rsi < self.params.rsi_pullback_long
                 
@@ -383,7 +378,7 @@ class XAUUSDStrategy(bt.Strategy):
                     return (True, "LONG", sl_distance)
             
             # SHORT: 4H bearish + pullback to EMA21 + RSI > 60
-            elif trend == TrendDirection.BEARISH:
+            elif trend == TREND_BEARISH:
                 pullback_to_ema = abs(price - ema) < atr * 0.5
                 rsi_condition = rsi > self.params.rsi_pullback_short
                 
@@ -392,7 +387,7 @@ class XAUUSDStrategy(bt.Strategy):
                     return (True, "SHORT", sl_distance)
         
         # ===== RANGING REGIME ENTRIES =====
-        elif regime == MarketRegime.RANGING:
+        elif regime == REGIME_RANGING:
             swing_high = self.swing_high[0]
             swing_low = self.swing_low[0]
             
@@ -537,7 +532,7 @@ class XAUUSDStrategy(bt.Strategy):
                 self.order = self.buy(size=lot_size)
                 self.daily_trades += 1
                 
-                regime = self.detect_regime().value
+                regime = self.detect_regime()
                 self.log(f"LONG Entry: {price:.2f} | SL: {self.stop_loss:.2f} | "
                         f"TP: {self.take_profit:.2f} | Size: {lot_size} | Regime: {regime}")
                 
@@ -550,7 +545,7 @@ class XAUUSDStrategy(bt.Strategy):
                 self.order = self.sell(size=lot_size)
                 self.daily_trades += 1
                 
-                regime = self.detect_regime().value
+                regime = self.detect_regime()
                 self.log(f"SHORT Entry: {price:.2f} | SL: {self.stop_loss:.2f} | "
                         f"TP: {self.take_profit:.2f} | Size: {lot_size} | Regime: {regime}")
     

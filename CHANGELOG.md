@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1] - 2025-12-09
+
+### Fixed
+- **TradeLocker Compatibility**: Removed `enum` module import which is not allowed by TradeLocker security policy
+- Replaced `MarketRegime` and `TrendDirection` Enum classes with string constants
+- Removed `datetime` module import (not needed)
+
 ## [1.0.0] - 2025-12-09
 
 ### Added
