@@ -600,7 +600,7 @@ class XAUUSDStrategy(bt.Strategy):
             consistency_ratio = (self.best_day_profit / self.total_profit) * 100
             self.log(f"Consistency Ratio: {consistency_ratio:.1f}% (must be <20%)")
             if consistency_ratio > 20:
-                self.log("⚠️ WARNING: Consistency rule violated!")
+                self.log("WARNING: Consistency rule violated!")
                 self.log(f"   Violations: {len(self.consistency_violations)}")
         
         # Phase targets check
@@ -608,8 +608,8 @@ class XAUUSDStrategy(bt.Strategy):
         phase2_target = self.params.account_size * 0.05  # 5%
         
         if self.total_profit >= phase1_target:
-            self.log(f"✅ Phase 1 Target PASSED (${phase1_target:.2f})")
+            self.log(f"[PASSED] Phase 1 Target (${phase1_target:.2f})")
         else:
-            self.log(f"❌ Phase 1 Target NOT MET (need ${phase1_target:.2f})")
+            self.log(f"[NOT MET] Phase 1 Target (need ${phase1_target:.2f})")
         
         self.log("=" * 60)
