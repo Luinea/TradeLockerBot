@@ -1,29 +1,29 @@
 # XAUUSD EMA Crossover Strategy for TradeLocker
-# v3.1 - Optimized for FundedHero Challenge Compliance (max 12% drawdown)
+# v4.0 - Ultra-Conservative for FundedHero Challenge (max 12% DD)
 
 import backtrader as bt
 
 
 class XAUUSDStrategy(bt.Strategy):
     params = {
-        # Risk Management (conservative for challenge)
+        # Ultra-Conservative Risk Management
         "account_size": 2500,
-        "risk_percent": 0.4,           # Reduced from 0.5 to limit drawdown
-        "max_trades_per_day": 3,
+        "risk_percent": 0.15,          # Only 0.15% per trade ($3.75)
+        "max_trades_per_day": 2,       # Reduced from 3
+        "max_daily_loss": 25,          # Stop if down $25/day (1%)
         
-        # Position Sizing (conservative)
-        "min_lots": 0.03,
-        "max_lots": 0.05,              # Reduced from 0.08 for consistency
+        # Fixed Small Position Size
+        "fixed_lots": 0.03,            # Fixed 0.03 lots (smallest allowed)
         "point_value": 100,
         
-        # Indicators
-        "ema_fast": 9,
-        "ema_slow": 21,
+        # Indicators (slower for fewer signals)
+        "ema_fast": 12,
+        "ema_slow": 26,
         "atr_period": 14,
         
-        # Exits (wider for fewer stops)
-        "sl_atr_mult": 2.5,            # Increased from 2.0
-        "tp_atr_mult": 4.0,            # Increased from 3.0 (1.6:1 R:R)
+        # Wide Exits (reduce whipsaws)
+        "sl_atr_mult": 3.0,            # 3x ATR stop
+        "tp_atr_mult": 5.0,            # 5x ATR target (1.67:1 R:R)
     }
 
     def __init__(self) -> None:
@@ -32,6 +32,7 @@ class XAUUSDStrategy(bt.Strategy):
         self.take_profit = None
         self.current_date = None
         self.daily_trades = 0
+        self.daily_pnl = 0.0
         self.total_pnl = 0.0
         self.wins = 0
         self.losses = 0
@@ -45,24 +46,22 @@ class XAUUSDStrategy(bt.Strategy):
         self.ema_cross = bt.indicators.CrossOver(self.ema_fast, self.ema_slow)
         self.atr = bt.indicators.ATR(self.datas[0], period=self.params.atr_period)
 
-    def calculate_lot_size(self, sl_distance):
-        risk = self.params.account_size * (self.params.risk_percent / 100)
-        if sl_distance <= 0:
-            return self.params.min_lots
-        lots = risk / (sl_distance * self.params.point_value)
-        return round(max(self.params.min_lots, min(self.params.max_lots, lots)), 2)
-
     def next(self) -> None:
         # Daily reset
         current_dt = self.datas[0].datetime.date(0)
         if self.current_date != current_dt:
             self.current_date = current_dt
             self.daily_trades = 0
+            self.daily_pnl = 0.0
         
         if self.order:
             return
         
         if len(self.datas[0]) < 30:
+            return
+        
+        # Daily loss limit
+        if self.daily_pnl <= -self.params.max_daily_loss:
             return
         
         if self.daily_trades >= self.params.max_trades_per_day:
@@ -85,7 +84,7 @@ class XAUUSDStrategy(bt.Strategy):
             return
         
         sl_dist = atr * self.params.sl_atr_mult
-        lots = self.calculate_lot_size(sl_dist)
+        lots = self.params.fixed_lots
         
         # LONG on bullish crossover
         if cross > 0:
@@ -110,12 +109,14 @@ class XAUUSDStrategy(bt.Strategy):
 
     def notify_trade(self, trade):
         if trade.isclosed:
-            self.total_pnl += trade.pnl
-            if trade.pnl > 0:
+            pnl = trade.pnl
+            self.daily_pnl += pnl
+            self.total_pnl += pnl
+            if pnl > 0:
                 self.wins += 1
             else:
                 self.losses += 1
-            self.log(f"PnL: ${trade.pnl:.2f} Total: ${self.total_pnl:.2f}")
+            self.log(f"PnL: ${pnl:.2f} Total: ${self.total_pnl:.2f}")
             self.stop_loss = None
             self.take_profit = None
 
@@ -123,8 +124,8 @@ class XAUUSDStrategy(bt.Strategy):
         self.log(f"=== Final: ${self.total_pnl:.2f} | {self.wins}W/{self.losses}L ===")
 
     params_metadata = {
-        "ema_fast": {"label": "Fast EMA", "value_type": "int"},
-        "ema_slow": {"label": "Slow EMA", "value_type": "int"},
+        "fixed_lots": {"label": "Lot Size", "helper_text": "Fixed lots per trade", "value_type": "float"},
+        "max_daily_loss": {"label": "Max Daily Loss", "helper_text": "Stop trading if hit", "value_type": "float"},
         "sl_atr_mult": {"label": "SL (ATR x)", "value_type": "float"},
         "tp_atr_mult": {"label": "TP (ATR x)", "value_type": "float"},
     }
