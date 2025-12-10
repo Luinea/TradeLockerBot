@@ -21,7 +21,11 @@ class LondonBreakoutStrategy(bt.Strategy):
         
         # Symbol specifics
         ("contract_size", 100),
-        ("tp_risk_reward", 2.0),
+        ("tp_risk_reward", 1.5),
+        # Trailing Stop Parameters
+        ("use_trailing_stop", True),
+        ("trailing_activation_pct", 0.4),  # Activate after 40% of TP distance reached
+        ("trailing_distance_pct", 0.5),    # Trail at 50% of initial risk
     )
 
     def __init__(self):
@@ -38,6 +42,16 @@ class LondonBreakoutStrategy(bt.Strategy):
         # Previous day's range (fallback for 30m timeframe)
         self.prev_asian_high = -1.0
         self.prev_asian_low = 999999.0
+        
+        # Trailing Stop Tracking
+        self.stop_order = None
+        self.limit_order = None
+        self.entry_price = None
+        self.initial_sl_price = None
+        self.position_direction = None  # 'LONG' or 'SHORT'
+        self.highest_since_entry = None
+        self.lowest_since_entry = None
+        self.trailing_active = False
 
     def log(self, txt, dt=None):
         if dt is None:
@@ -67,8 +81,53 @@ class LondonBreakoutStrategy(bt.Strategy):
             self.daily_pnl = trade.pnlcomm
             self.last_trade_date = current_date
             self.daily_trades = 0
+        
+        self.log(f'{self.last_trade_date}, Daily PnL: ${self.daily_pnl:.2f}')
+        
+        # Reset trailing stop tracking when trade closes
+        self.entry_price = None
+        self.initial_sl_price = None
+        self.position_direction = None
+        self.highest_since_entry = None
+        self.lowest_since_entry = None
+        self.trailing_active = False
+    
+    def notify_order(self, order):
+        """Track order status and references for trailing stop"""
+        if order.status in [order.Submitted, order.Accepted]:
+            return
+
+        if order.status in [order.Completed]:
+            # Track entry orders
+            if order.isbuy():
+                if self.entry_price is None:  # This is the market entry order
+                    self.entry_price = order.executed.price
+                    self.position_direction = 'LONG'
+                    self.highest_since_entry = order.executed.price
+                    self.trailing_active = False
+                    self.log(f'LONG Entry @ {self.entry_price:.2f}')
+            elif order.issell():
+                if self.entry_price is None:  # This is the market entry order
+                    self.entry_price = order.executed.price
+                    self.position_direction = 'SHORT'
+                    self.lowest_since_entry = order.executed.price
+                    self.trailing_active = False
+                    self.log(f'SHORT Entry @ {self.entry_price:.2f}')
             
-        self.log(f'Daily PnL: ${self.daily_pnl:.2f}')
+            # Track stop and limit orders from bracket
+            if order.exectype == order.Stop:
+                self.stop_order = order
+                if self.initial_sl_price is None:
+                    self.initial_sl_price = order.created.price
+            elif order.exectype == order.Limit:
+                self.limit_order = order
+        
+        elif order.status in [order.Canceled, order.Margin, order.Rejected]:
+            # Reset if orders are cancelled
+            if order == self.stop_order:
+                self.stop_order = None
+            elif order == self.limit_order:
+                self.limit_order = None
 
     def next(self):
         # --- DAILY RESET ---
@@ -108,6 +167,63 @@ class LondonBreakoutStrategy(bt.Strategy):
         # Daily loss limit
         if self.daily_pnl <= -self.params.max_daily_loss:
             return # Daily Stop
+
+        # --- TRAILING STOP LOGIC ---
+        if self.params.use_trailing_stop and self.position and self.entry_price and self.initial_sl_price:
+            current_price = self.data.close[0]
+            initial_risk = abs(self.entry_price - self.initial_sl_price)
+            
+            if self.position_direction == 'LONG':
+                # Update highest price since entry
+                if current_price > self.highest_since_entry:
+                    self.highest_since_entry = current_price
+                
+                # Check if trailing should activate
+                profit = current_price - self.entry_price
+                activation_threshold = initial_risk * self.params.trailing_activation_pct
+                
+                if not self.trailing_active and profit >= activation_threshold:
+                    self.trailing_active = True
+                    self.log(f'Trailing Stop ACTIVATED for LONG @ profit={profit:.2f}, threshold={activation_threshold:.2f}')
+                
+                # Apply trailing stop if active
+                if self.trailing_active and self.stop_order:
+                    trail_distance = initial_risk * self.params.trailing_distance_pct
+                    new_sl = self.highest_since_entry - trail_distance
+                    
+                    # Only move SL up, never down
+                    current_sl = self.stop_order.created.price
+                    if new_sl > current_sl:
+                        # Cancel old stop and create new one
+                        self.broker.cancel(self.stop_order)
+                        self.stop_order = self.sell(exectype=bt.Order.Stop, price=new_sl, size=abs(self.position.size))
+                        self.log(f'Trailing SL Updated: {current_sl:.2f} → {new_sl:.2f} (trail dist={trail_distance:.2f})')
+            
+            elif self.position_direction == 'SHORT':
+                # Update lowest price since entry
+                if current_price < self.lowest_since_entry:
+                    self.lowest_since_entry = current_price
+                
+                # Check if trailing should activate
+                profit = self.entry_price - current_price
+                activation_threshold = initial_risk * self.params.trailing_activation_pct
+                
+                if not self.trailing_active and profit >= activation_threshold:
+                    self.trailing_active = True
+                    self.log(f'Trailing Stop ACTIVATED for SHORT @ profit={profit:.2f}, threshold={activation_threshold:.2f}')
+                
+                # Apply trailing stop if active
+                if self.trailing_active and self.stop_order:
+                    trail_distance = initial_risk * self.params.trailing_distance_pct
+                    new_sl = self.lowest_since_entry + trail_distance
+                    
+                    # Only move SL down, never up
+                    current_sl = self.stop_order.created.price
+                    if new_sl < current_sl:
+                        # Cancel old stop and create new one
+                        self.broker.cancel(self.stop_order)
+                        self.stop_order = self.buy(exectype=bt.Order.Stop, price=new_sl, size=abs(self.position.size))
+                        self.log(f'Trailing SL Updated: {current_sl:.2f} → {new_sl:.2f} (trail dist={trail_distance:.2f})')
 
         # --- STRATEGY LOGIC ---
         dt = self.datas[0].datetime.datetime(0)
