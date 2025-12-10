@@ -5,10 +5,14 @@ class MacdStrategy(bt.Strategy):
     """
     Enhanced MACD Strategy based on TradingLab methodology.
     
+    Optimizations (2025-12-10):
+    - min_sl_distance: 20 pips (increased from 10) for XAUUSD volatility
+    - ema_sl_multiplier: 1.5x (increased from 1.0) for trend breathing room
+    
     Rules:
     - LONG: MACD crosses above signal BELOW zero line + price above 200 EMA + near support
     - SHORT: MACD crosses below signal ABOVE zero line + price below 200 EMA + near resistance
-    - Stop Loss: Based on distance to 200 EMA (not fixed pips)
+    - Stop Loss: Max of (EMA distance * multiplier, min distance)
     - Take Profit: 1.5x risk/reward ratio
     - Support/Resistance: Detected via swing high/low analysis
     """
@@ -30,9 +34,9 @@ class MacdStrategy(bt.Strategy):
         ("contract_size", 100),
         
         # TradingLab Enhanced Parameters
-        ("min_sl_distance", 10.0),     # Minimum SL distance as fallback
-        ("ema_sl_multiplier", 1.0),    # Multiplier for EMA-based SL distance
-        ("tp_risk_reward", 1.5),       # Updated to 1.5:1 R:R per TradingLab
+        ("min_sl_distance", 20.0),     # Min SL: 20 pips for XAUUSD volatility (optimized from 10.0)
+        ("ema_sl_multiplier", 1.5),    # EMA SL multiplier: 1.5x for breathing room (optimized from 1.0)
+        ("tp_risk_reward", 1.5),       # R:R ratio: 1.5:1 per TradingLab
         
         # Support/Resistance Detection
         ("sr_lookback", 20),           # Bars to look back for swing highs/lows

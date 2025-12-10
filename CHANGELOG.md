@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Critical crash in S/R detection**: Fixed malformed conditional expression in `detect_sr_levels()` method that was causing syntax errors and crashes in TradeLocker. The expression `if i > 0 else True` was improperly structured. Now uses proper try-except blocks and starts loop at i=2 to ensure both neighbor bars exist for swing point detection.
 
+### Changed - MACD Strategy Parameter Optimization (2025-12-10)
+- **Minimum SL increased**: `min_sl_distance` from 10.0 to 20.0 pips to accommodate XAUUSD volatility on 15m timeframe
+- **EMA SL multiplier increased**: `ema_sl_multiplier` from 1.0 to 1.5 to provide more breathing room for trend pullbacks
+- **Rationale**: Backtest analysis (Feb 2025) showed 10-pip SL too tight:
+  - 64% stop loss hit rate (7/11 trades)
+  - 6/11 trades used minimum 10-pip SL with only 33% win rate
+  - Feb 25 disaster: 3 consecutive 10-pip SL losses totaling -$60.36
+  - Expected improvement: Win rate from 36% to 45-50% target
+
 ### Changed - MacdStrategy Enhancement (TradingLab Rules)
 - **Zero-line crossover filter**: Long entries now require MACD to cross above signal while both are below zero line; short entries require crossing below signal while both are above zero line (per TradingLab video methodology)
 - **200 EMA-based stop loss**: Stop loss now calculated dynamically based on distance to 200 EMA instead of fixed 20 pips, with configurable multiplier (`ema_sl_multiplier`) and minimum distance safeguard (`min_sl_distance`)
