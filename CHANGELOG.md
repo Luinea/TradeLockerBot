@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - EUR_USD Professional Trading Strategy (2025-12-10)
+- **Feature**: Created comprehensive EUR_USD trading bot based on institutional-grade research
+- **Strategy Components**:
+  - **Dual-Filter EMA System**: 200 EMA trend filter + 20/50 EMA crossover signals
+  - **Break and Retest**: Validates breakouts and waits for retest confirmation to filter false signals
+  - **Session-Based Trading**: Only trades during London-NY overlap (12:00-16:00 UTC) for optimal liquidity and tighter spreads
+  - **ATR-Based Risk Management**: Professional position sizing with 1.5x ATR stop loss and 2.5x ATR take profit (1.67:1 R:R)
+  - **Fibonacci Confluence**: Uses 38.2% and 61.8% retracement levels for additional entry validation
+- **Key Features**:
+  - Trend direction filter prevents counter-trend trades (only longs in uptrends, shorts in downtrends)
+  - "Angle of Attack" momentum filter ensures strong EMA divergence before entry
+  - Support/Resistance detection using swing highs/lows
+  - Dynamic position sizing based on account equity and ATR volatility
+  - Comprehensive logging with trade rationale and performance metrics
+- **Configurable Parameters**: 13 parameters including EMA periods, ATR multipliers, session hours, risk %, and feature toggles
+- **Research Source**: Based on "EUR_USD Trading Strategies Research.md" comprehensive analysis
+
 ### Added - London Breakout Trailing Stop (2025-12-10)
 - **Feature**: Implemented dynamic trailing stop to reduce max drawdown and lock in profits
 - **Why**: Backtest showed excellent ROI (35.87%) and win rate (55.70%) but max drawdown (21.78%) exceeded FundedHero's 12% limit
