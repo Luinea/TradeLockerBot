@@ -117,9 +117,14 @@ class EurUsdStrategy(bt.Strategy):
         """Logging function with timestamp"""
         if not self.params.enable_logging:
             return
-            
-        dt = dt or self.datas[0].datetime.datetime(0)
-        print(f'[{dt.strftime("%Y-%m-%d %H:%M:%S")}] {txt}')
+        
+        # Handle case where data is not yet available (during __init__)
+        try:
+            dt = dt or self.datas[0].datetime.datetime(0)
+            print(f'[{dt.strftime("%Y-%m-%d %H:%M:%S")}] {txt}')
+        except (IndexError, AttributeError):
+            # During initialization, data may not be available yet
+            print(f'[INIT] {txt}')
 
     def start(self):
         """Called when strategy starts"""

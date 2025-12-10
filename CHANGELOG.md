@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Configurable Parameters**: 13 parameters including EMA periods, ATR multipliers, session hours, risk %, and feature toggles
 - **Research Source**: Based on "EUR_USD Trading Strategies Research.md" comprehensive analysis
 
+### Fixed - EUR_USD Strategy Initialization Error (2025-12-10)
+- **Bug**: Strategy crashed on backtest initialization with `IndexError: array index out of range`
+- **Impact**: Prevented any backtesting of the EUR_USD strategy
+- **Root Cause**: `log()` method called from `__init__` attempted to access `self.datas[0].datetime.datetime(0)` before data was loaded into Backtrader
+- **Fix**: Added try-except block in `log()` method to gracefully handle unavailable data during initialization phase, falling back to `[INIT]` prefix instead of timestamp
+- **Expected Impact**: Strategy can now initialize and run backtests successfully
+
 ### Added - London Breakout Trailing Stop (2025-12-10)
 - **Feature**: Implemented dynamic trailing stop to reduce max drawdown and lock in profits
 - **Why**: Backtest showed excellent ROI (35.87%) and win rate (55.70%) but max drawdown (21.78%) exceeded FundedHero's 12% limit
