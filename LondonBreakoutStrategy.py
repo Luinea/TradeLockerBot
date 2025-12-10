@@ -167,7 +167,9 @@ class LondonBreakoutStrategy(bt.Strategy):
         
         # 3. End of Day (Close All)
         elif hour >= self.params.trade_end_hour:
-            if self.position:
+            # Check if we have a meaningful position before closing
+            # Prevents 0.0 lot orders from floating point errors
+            if self.position and abs(self.position.size) >= 0.01:
                 self.log("End of Day - Closing Positions")
                 self.close()
             if self.order:

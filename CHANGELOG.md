@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Drawdown limit now stops trading for the day, not permanently
     - Strategy can recover and resume trading the next day
   - **Expected Impact**: Strategy should now trade consistently throughout multi-month periods instead of stopping after first drawdown spike
+- **London Breakout 0.0 Lots Bug (2025-12-10)**:
+  - **Bug**: End-of-day position closure attempted to trade 0.0 lots due to floating point rounding errors
+  - **Impact**: Caused order rejections: `Order size 0.0 is less than the minimum lot size 0.01`
+  - **Root Cause**: Floating point arithmetic created residual position sizes of `3.47e-18` which rounded to 0.0
+  - **Fix**: Added minimum position size check (`abs(position.size) >= 0.01`) before closing positions at end of day
+  - **Expected Impact**: Eliminates order rejection errors from tiny residual positions
 
 ### Changed - MACD Strategy Parameter Optimization (2025-12-10)
 - **Minimum SL increased**: `min_sl_distance` from 10.0 to 20.0 pips to accommodate XAUUSD volatility on 15m timeframe
