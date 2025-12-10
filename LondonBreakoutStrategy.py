@@ -35,6 +35,9 @@ class LondonBreakoutStrategy(bt.Strategy):
         self.asian_high = -1.0
         self.asian_low = 999999.0
         self.range_established = False
+        # Previous day's range (fallback for 30m timeframe)
+        self.prev_asian_high = -1.0
+        self.prev_asian_low = 999999.0
 
     def log(self, txt, dt=None):
         if dt is None:
@@ -76,6 +79,10 @@ class LondonBreakoutStrategy(bt.Strategy):
             self.last_trade_date = current_date
             # Reset drawdown tracking daily (allows recovery)
             self.daily_peak_equity = self.broker.getvalue()
+            # Save previous day's range (fallback for 30m timeframe)
+            if self.asian_high > 0:  # Only save if we had a valid range
+                self.prev_asian_high = self.asian_high
+                self.prev_asian_low = self.asian_low
             # Reset range for new day
             self.asian_high = -1.0
             self.asian_low = 999999.0
@@ -115,6 +122,13 @@ class LondonBreakoutStrategy(bt.Strategy):
             
         # 2. London Session (Trading)
         elif hour >= self.params.asian_end_hour and hour < self.params.trade_end_hour:
+            # Fallback: Use previous day's range if current day has no Asian session bars (30m timeframe issue)
+            if not self.range_established and self.prev_asian_high > 0:
+                self.asian_high = self.prev_asian_high
+                self.asian_low = self.prev_asian_low
+                self.range_established = True
+                self.log(f"Using previous day's Asian range: High={self.asian_high:.2f}, Low={self.asian_low:.2f}")
+            
             if not self.range_established:
                 return
                 

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Critical crash in S/R detection**: Fixed malformed conditional expression in `detect_sr_levels()` method that was causing syntax errors and crashes in TradeLocker. The expression `if i > 0 else True` was improperly structured. Now uses proper try-except blocks and starts loop at i=2 to ensure both neighbor bars exist for swing point detection.
+- **London Breakout 30m Timeframe Compatibility (2025-12-10)**:
+  - **Bug**: Strategy stopped trading after Feb 14 when using 30m timeframe
+  - **Impact**: No Asian session bars during 00:00-08:00 on some days prevented `range_established` from being set, blocking all trading
+  - **Root Cause**: 30m bars (16 per Asian session) vs 15m bars (32 per session) - gaps in data prevented range establishment
+  - **Fix**: Added fallback mechanism to use previous day's Asian range when current day has no bars during Asian session
+  - **Expected Impact**: Strategy now works reliably on both 15m and 30m timeframes
 - **London Breakout Strategy Permanent Lock Bug (2025-12-10)**:
   - **Critical Bug**: Strategy had a permanent lock mechanism that prevented all trading after hitting 6% drawdown
   - **Impact**: Strategy stopped trading permanently in March 2025 despite excellent performance (53.85% win rate, +4.44% ROI before halt)
