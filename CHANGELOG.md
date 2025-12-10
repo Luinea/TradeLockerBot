@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Critical crash in S/R detection**: Fixed malformed conditional expression in `detect_sr_levels()` method that was causing syntax errors and crashes in TradeLocker. The expression `if i > 0 else True` was improperly structured. Now uses proper try-except blocks and starts loop at i=2 to ensure both neighbor bars exist for swing point detection.
+- **London Breakout Strategy Permanent Lock Bug (2025-12-10)**:
+  - **Critical Bug**: Strategy had a permanent lock mechanism that prevented all trading after hitting 6% drawdown
+  - **Impact**: Strategy stopped trading permanently in March 2025 despite excellent performance (53.85% win rate, +4.44% ROI before halt)
+  - **Root Cause**: Used permanent `peak_equity` and `permanent_lock` flag that never reset
+  - **Fix**: Replaced with daily drawdown tracking that resets each day
+    - Changed `peak_equity` → `daily_peak_equity` (resets at start of each trading day)
+    - Removed `permanent_lock` flag entirely
+    - Drawdown limit now stops trading for the day, not permanently
+    - Strategy can recover and resume trading the next day
+  - **Expected Impact**: Strategy should now trade consistently throughout multi-month periods instead of stopping after first drawdown spike
 
 ### Changed - MACD Strategy Parameter Optimization (2025-12-10)
 - **Minimum SL increased**: `min_sl_distance` from 10.0 to 20.0 pips to accommodate XAUUSD volatility on 15m timeframe

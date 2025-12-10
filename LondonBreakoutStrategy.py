@@ -29,8 +29,7 @@ class LondonBreakoutStrategy(bt.Strategy):
         self.daily_trades = 0
         self.daily_pnl = 0.0
         self.last_trade_date = None
-        self.permanent_lock = False
-        self.peak_equity = 0.0
+        self.daily_peak_equity = 0.0  # Changed: daily reset instead of permanent
         
         # Range tracking
         self.asian_high = -1.0
@@ -50,7 +49,7 @@ class LondonBreakoutStrategy(bt.Strategy):
 
     def start(self):
         self.log("London Breakout Strategy Started")
-        self.peak_equity = self.broker.getvalue()
+        self.daily_peak_equity = self.broker.getvalue()
 
     def notify_trade(self, trade):
         if not trade.isclosed:
@@ -69,33 +68,37 @@ class LondonBreakoutStrategy(bt.Strategy):
         self.log(f'Daily PnL: ${self.daily_pnl:.2f}')
 
     def next(self):
-        # --- RISK MANAGEMENT (CRITICAL) ---
-        current_equity = self.broker.getvalue()
-        if current_equity > self.peak_equity:
-            self.peak_equity = current_equity
-            
-        drawdown_pct = (self.peak_equity - current_equity) / self.peak_equity
-        if drawdown_pct > self.params.max_drawdown_percent:
-            if not self.permanent_lock:
-                self.log(f"!!! CRITICAL: Max Drawdown Hit ({drawdown_pct*100:.2f}%). HALTING !!!")
-                self.permanent_lock = True
-            if self.position: self.close()
-            if self.order: self.broker.cancel(self.order)
-            return
-
-        if self.permanent_lock:
-            return
-
+        # --- DAILY RESET ---
         current_date = self.datas[0].datetime.date(0)
         if self.last_trade_date != current_date:
             self.daily_trades = 0
             self.daily_pnl = 0.0
             self.last_trade_date = current_date
+            # Reset drawdown tracking daily (allows recovery)
+            self.daily_peak_equity = self.broker.getvalue()
             # Reset range for new day
             self.asian_high = -1.0
             self.asian_low = 999999.0
             self.range_established = False
+        
+        # --- DAILY RISK MANAGEMENT ---
+        current_equity = self.broker.getvalue()
+        
+        # Update daily peak
+        if current_equity > self.daily_peak_equity:
+            self.daily_peak_equity = current_equity
+            
+        # Calculate daily drawdown
+        daily_drawdown_pct = (self.daily_peak_equity - current_equity) / self.daily_peak_equity
+        
+        # Daily drawdown limit (stop trading for the day)
+        if daily_drawdown_pct > self.params.max_drawdown_percent:
+            self.log(f"Daily Drawdown {daily_drawdown_pct*100:.2f}% exceeds limit. Stopping for today.")
+            if self.position: self.close()
+            if self.order: self.broker.cancel(self.order)
+            return
 
+        # Daily loss limit
         if self.daily_pnl <= -self.params.max_daily_loss:
             return # Daily Stop
 
