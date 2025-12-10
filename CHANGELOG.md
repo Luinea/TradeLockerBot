@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - London Breakout Trailing Stop (2025-12-10)
+- **Feature**: Implemented dynamic trailing stop to reduce max drawdown and lock in profits
+- **Why**: Backtest showed excellent ROI (35.87%) and win rate (55.70%) but max drawdown (21.78%) exceeded FundedHero's 12% limit
+- **Parameters**:
+  - `use_trailing_stop` (True): Enable/disable trailing stop functionality
+  - `trailing_activation_pct` (0.4): Activate trailing after 40% of initial TP distance reached
+  - `trailing_distance_pct` (0.5): Trail SL at 50% of initial risk distance from favorable extreme
+- **Mechanism**:
+  - Tracks highest price for LONG positions, lowest for SHORT positions
+  - Activates only after significant profit (prevents premature activation on noise)
+  - Dynamically adjusts SL upward (longs) or downward (shorts) as price moves favorably
+  - Never moves SL in unfavorable direction (only tightens protection)
+- **Expected Impact**: Should reduce max drawdown from 21.78% to under 12% while maintaining strong ROI
+
 ### Fixed - London Breakout Position Blocking Bug (2025-12-10) **CRITICAL**
 - **Bug**: Strategy stopped trading permanently after Feb 14-15 due to tiny residual positions blocking new entries
 - **Impact**: After end-of-day position closes, floating point errors left microscopic positions that prevented ALL future breakout trades on BOTH 15m and 30m timeframes
@@ -31,12 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Drawdown limit now stops trading for the day, not permanently
   - Strategy can recover and resume trading the next day
 - **Expected Impact**: Strategy should now trade consistently throughout multi-month periods instead of stopping after first drawdown spike
-- **London Breakout 0.0 Lots Bug (2025-12-10)**:
-  - **Bug**: End-of-day position closure attempted to trade 0.0 lots due to floating point rounding errors
-  - **Impact**: Caused order rejections: `Order size 0.0 is less than the minimum lot size 0.01`
-  - **Root Cause**: Floating point arithmetic created residual position sizes of `3.47e-18` which rounded to 0.0
-  - **Fix**: Added minimum position size check (`abs(position.size) >= 0.01`) before closing positions at end of day
-  - **Expected Impact**: Eliminates order rejection errors from tiny residual positions
+
+### Fixed - London Breakout 0.0 Lots Bug (2025-12-10)
+- **Bug**: End-of-day position closure attempted to trade 0.0 lots due to floating point rounding errors
+- **Impact**: Caused order rejections: `Order size 0.0 is less than the minimum lot size 0.01`
+- **Root Cause**: Floating point arithmetic created residual position sizes of `3.47e-18` which rounded to 0.0
+- **Fix**: Added minimum position size check (`abs(position.size) >= 0.01`) before closing positions at end of day
+- **Expected Impact**: Eliminates order rejection errors from tiny residual positions
 
 ### Changed - MACD Strategy Parameter Optimization (2025-12-10)
 - **Minimum SL increased**: `min_sl_distance` from 10.0 to 20.0 pips to accommodate XAUUSD volatility on 15m timeframe
