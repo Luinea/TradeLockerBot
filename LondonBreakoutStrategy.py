@@ -197,7 +197,7 @@ class LondonBreakoutStrategy(bt.Strategy):
                         # Cancel old stop and create new one
                         self.broker.cancel(self.stop_order)
                         self.stop_order = self.sell(exectype=bt.Order.Stop, price=new_sl, size=abs(self.position.size))
-                        self.log(f'Trailing SL Updated: {current_sl:.2f} → {new_sl:.2f} (trail dist={trail_distance:.2f})')
+                        self.log(f'Trailing SL Updated: {current_sl:.2f} -> {new_sl:.2f} (trail dist={trail_distance:.2f})')
             
             elif self.position_direction == 'SHORT':
                 # Update lowest price since entry
@@ -223,7 +223,7 @@ class LondonBreakoutStrategy(bt.Strategy):
                         # Cancel old stop and create new one
                         self.broker.cancel(self.stop_order)
                         self.stop_order = self.buy(exectype=bt.Order.Stop, price=new_sl, size=abs(self.position.size))
-                        self.log(f'Trailing SL Updated: {current_sl:.2f} → {new_sl:.2f} (trail dist={trail_distance:.2f})')
+                        self.log(f'Trailing SL Updated: {current_sl:.2f} -> {new_sl:.2f} (trail dist={trail_distance:.2f})')
 
         # --- STRATEGY LOGIC ---
         dt = self.datas[0].datetime.datetime(0)
