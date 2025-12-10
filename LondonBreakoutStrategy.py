@@ -132,7 +132,8 @@ class LondonBreakoutStrategy(bt.Strategy):
             if not self.range_established:
                 return
                 
-            if self.order or self.position:
+            # Only block if we have a meaningful position (prevent tiny residual positions from blocking trading)
+            if self.order or (self.position and abs(self.position.size) >= 0.01):
                 return
                 
             if self.daily_trades >= self.params.max_daily_trades:
