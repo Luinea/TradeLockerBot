@@ -134,22 +134,28 @@ class MacdStrategy(bt.Strategy):
         resistance_candidates = []
         
         # Find swing lows (potential support)
-        for i in range(1, lookback):
+        for i in range(2, lookback):
             if i >= len(self.data):
                 break
-            # Check if it's a swing low (lower than neighbors)
-            if (self.data.low[-i] < self.data.low[-i-1] and 
-                self.data.low[-i] < self.data.low[-i+1] if i > 0 else True):
-                support_candidates.append(self.data.low[-i])
+            # Check if it's a swing low (lower than both neighbors)
+            try:
+                if (self.data.low[-i] < self.data.low[-i-1] and 
+                    self.data.low[-i] < self.data.low[-i+1]):
+                    support_candidates.append(self.data.low[-i])
+            except (IndexError, AttributeError):
+                break
         
         # Find swing highs (potential resistance)
-        for i in range(1, lookback):
+        for i in range(2, lookback):
             if i >= len(self.data):
                 break
-            # Check if it's a swing high (higher than neighbors)
-            if (self.data.high[-i] > self.data.high[-i-1] and 
-                self.data.high[-i] > self.data.high[-i+1] if i > 0 else True):
-                resistance_candidates.append(self.data.high[-i])
+            # Check if it's a swing high (higher than both neighbors)
+            try:
+                if (self.data.high[-i] > self.data.high[-i-1] and 
+                    self.data.high[-i] > self.data.high[-i+1]):
+                    resistance_candidates.append(self.data.high[-i])
+            except (IndexError, AttributeError):
+                break
         
         # Keep only the 5 most recent levels to prevent list growth
         self.support_levels = support_candidates[-5:] if support_candidates else []
