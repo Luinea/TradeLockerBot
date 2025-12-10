@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Critical crash in S/R detection**: Fixed malformed conditional expression in `detect_sr_levels()` method that was causing syntax errors and crashes in TradeLocker. The expression `if i > 0 else True` was improperly structured. Now uses proper try-except blocks and starts loop at i=2 to ensure both neighbor bars exist for swing point detection.
+
 ### Changed - MacdStrategy Enhancement (TradingLab Rules)
 - **Zero-line crossover filter**: Long entries now require MACD to cross above signal while both are below zero line; short entries require crossing below signal while both are above zero line (per TradingLab video methodology)
 - **200 EMA-based stop loss**: Stop loss now calculated dynamically based on distance to 200 EMA instead of fixed 20 pips, with configurable multiplier (`ema_sl_multiplier`) and minimum distance safeguard (`min_sl_distance`)
