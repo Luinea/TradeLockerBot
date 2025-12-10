@@ -78,13 +78,14 @@ Even if the challenge doesn't strictly enforce the "20% consistency rule" for pa
 
 ## **6\. Weekly Roadmap (Phase 1 Example)**
 
-| Week | Goal | Amount | Focus |
-| :---- | :---- | :---- | :---- |
-| **Week 1** | \+2.5% | $62.50 | Build a buffer above start balance. |
-| **Week 2** | \+2.5% | $62.50 | Maintain rhythm. You are halfway there ($125). |
-| **Week 3** | \+2.0% | $50.00 | Don't rush. Wait for setups. Total: $175. |
-| **Week 4** | \+1.0% | $25.00 | Finish the remaining $25. Pass Phase 1\. |
-| **Total** | **8%** | **$200** | **CHALLENGE PASSED** |
+|
+
+| Week | Goal | Amount | Focus |  
+| Week 1 | \+2.5% | $62.50 | Build a buffer above start balance. |  
+| Week 2 | \+2.5% | $62.50 | Maintain rhythm. You are halfway there ($125). |  
+| Week 3 | \+2.0% | $50.00 | Don't rush. Wait for setups. Total: $175. |  
+| Week 4 | \+1.0% | $25.00 | Finish the remaining $25. Pass Phase 1\. |  
+| Total | 8% | $200 | CHALLENGE PASSED |
 
 ## **7\. Financial Roadmap (When do you get paid?)**
 
@@ -107,8 +108,7 @@ Even if the challenge doesn't strictly enforce the "20% consistency rule" for pa
 * Best Day: $100  
 * Calculation: $100 / 200 \= 50\\%$ (**VIOLATION**)
 
-How to Fix a Breach:  
-You must keep trading small days to increase the "Total Profit" denominator without increasing the "Best Day" numerator.
+**How to Fix a Breach:** You must keep trading small days to increase the "Total Profit" denominator without increasing the "Best Day" numerator.
 
 * *Fix:* Trade 5 more days making $20 each. New Total \= $300. Best Day \= $100. Ratio \= 33%. Keep going until \< 20%.
 
@@ -133,12 +133,10 @@ You must keep trading small days to increase the "Total Profit" denominator with
 
 ## **9\. Master Rules Table**
 
-| Feature | Phase 1 | Phase 2 | Funded Account |
-| :---- | :---- | :---- | :---- |
-| **Profit Target** | 8% ($200) | 5% ($125) | None (Withdraw anytime\*) |
-| **Daily Loss** | 6% ($150) | 6% ($150) | 5% ($125) |
-| **Max Loss** | 12% ($300) | 12% ($300) | 10% ($250) |
-| **Drawdown Type** | Static | Static | Static |
-| **Time Limit** | Unlimited | Unlimited | Unlimited |
-| **Refund** | No | No | Yes (w/ 1st Payout) |
-
+| Feature | Phase 1 | Phase 2 | Funded Account |  
+| Profit Target | 8% ($200) | 5% ($125) | None (Withdraw anytime\*) |  
+| Daily Loss | 6% ($150) | 6% ($150) | 5% ($125) |  
+| Max Loss | 12% ($300) | 12% ($300) | 10% ($250) |  
+| Drawdown Type | Static | Static | Static |  
+| Time Limit | Unlimited | Unlimited | Unlimited |  
+| Refund | No | No | Yes (w/ 1st Payout) |

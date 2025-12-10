@@ -1,0 +1,171 @@
+import backtrader as bt
+import datetime
+
+class LondonBreakoutStrategy(bt.Strategy):
+    """
+    London Breakout Strategy for XAUUSD.
+    Captures volatility at London Open (08:00 GMT) by trading breakouts of the Asian Session (00:00-08:00).
+    """
+    
+    params = (
+        ("asian_start_hour", 0),
+        ("asian_end_hour", 8),
+        ("trade_end_hour", 20),
+        
+        # Risk Limits (FundedHero)
+        ("risk_per_trade_percent", 0.01),
+        ("max_daily_trades", 3),
+        ("max_daily_loss", 75.0),
+        ("max_drawdown_percent", 0.06), # 6% Hard Stop
+        ("max_lots", 0.5),
+        
+        # Symbol specifics
+        ("contract_size", 100),
+        ("tp_risk_reward", 2.0),
+    )
+
+    def __init__(self):
+        self.order = None
+        self.daily_trades = 0
+        self.daily_pnl = 0.0
+        self.last_trade_date = None
+        self.permanent_lock = False
+        self.peak_equity = 0.0
+        
+        # Range tracking
+        self.asian_high = -1.0
+        self.asian_low = 999999.0
+        self.range_established = False
+
+    def log(self, txt, dt=None):
+        if dt is None:
+            try:
+                dt = self.datas[0].datetime.date(0)
+                dts = dt.isoformat()
+            except IndexError:
+                dts = "---"
+        else:
+            dts = dt.isoformat() if hasattr(dt, 'isoformat') else str(dt)
+        print(f'{dts}, {txt}')
+
+    def start(self):
+        self.log("London Breakout Strategy Started")
+        self.peak_equity = self.broker.getvalue()
+
+    def notify_trade(self, trade):
+        if not trade.isclosed:
+            return
+
+        self.log(f'TRADE PROFIT, GROSS {trade.pnl:.2f}, NET {trade.pnlcomm:.2f}')
+        
+        current_date = self.datas[0].datetime.date(0)
+        if self.last_trade_date == current_date:
+            self.daily_pnl += trade.pnlcomm
+        else:
+            self.daily_pnl = trade.pnlcomm
+            self.last_trade_date = current_date
+            self.daily_trades = 0
+            
+        self.log(f'Daily PnL: ${self.daily_pnl:.2f}')
+
+    def next(self):
+        # --- RISK MANAGEMENT (CRITICAL) ---
+        current_equity = self.broker.getvalue()
+        if current_equity > self.peak_equity:
+            self.peak_equity = current_equity
+            
+        drawdown_pct = (self.peak_equity - current_equity) / self.peak_equity
+        if drawdown_pct > self.params.max_drawdown_percent:
+            if not self.permanent_lock:
+                self.log(f"!!! CRITICAL: Max Drawdown Hit ({drawdown_pct*100:.2f}%). HALTING !!!")
+                self.permanent_lock = True
+            if self.position: self.close()
+            if self.order: self.broker.cancel(self.order)
+            return
+
+        if self.permanent_lock:
+            return
+
+        current_date = self.datas[0].datetime.date(0)
+        if self.last_trade_date != current_date:
+            self.daily_trades = 0
+            self.daily_pnl = 0.0
+            self.last_trade_date = current_date
+            # Reset range for new day
+            self.asian_high = -1.0
+            self.asian_low = 999999.0
+            self.range_established = False
+
+        if self.daily_pnl <= -self.params.max_daily_loss:
+            return # Daily Stop
+
+        # --- STRATEGY LOGIC ---
+        dt = self.datas[0].datetime.datetime(0)
+        hour = dt.hour
+        price = self.data.close[0]
+
+        # 1. Asian Session (Range Building)
+        if hour >= self.params.asian_start_hour and hour < self.params.asian_end_hour:
+            if price > self.asian_high: self.asian_high = price
+            if price < self.asian_low: self.asian_low = price
+            self.range_established = True
+            
+        # 2. London Session (Trading)
+        elif hour >= self.params.asian_end_hour and hour < self.params.trade_end_hour:
+            if not self.range_established:
+                return
+                
+            if self.order or self.position:
+                return
+                
+            if self.daily_trades >= self.params.max_daily_trades:
+                return
+            
+            # Entry Logic
+            if self.asian_high == -1: return 
+            
+            # BUY Breakout
+            if price > self.asian_high:
+                # Calculate Risk (SL at Mid-Range)
+                sl_price = (self.asian_high + self.asian_low) / 2
+                sl_dist = price - sl_price
+                if sl_dist <= 0: return 
+                
+                tp_dist = sl_dist * self.params.tp_risk_reward
+                tp_price = price + tp_dist
+                
+                risk_amt = self.broker.getvalue() * self.params.risk_per_trade_percent
+                size = round(risk_amt / (sl_dist * self.params.contract_size), 2)
+                if size > self.params.max_lots: size = self.params.max_lots
+                
+                if size > 0:
+                    self.log(f'BREAKOUT BUY: Price {price:.2f} > Asian High {self.asian_high:.2f}')
+                    self.buy_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
+                    self.daily_trades += 1
+
+            # SELL Breakout
+            elif price < self.asian_low:
+                # Calculate Risk (SL at Mid-Range)
+                sl_price = (self.asian_high + self.asian_low) / 2
+                sl_dist = sl_price - price
+                if sl_dist <= 0: return
+                
+                tp_dist = sl_dist * self.params.tp_risk_reward
+                tp_price = price - tp_dist
+                
+                risk_amt = self.broker.getvalue() * self.params.risk_per_trade_percent
+                size = round(risk_amt / (sl_dist * self.params.contract_size), 2)
+                if size > self.params.max_lots: size = self.params.max_lots
+                
+                if size > 0:
+                    self.log(f'BREAKOUT SELL: Price {price:.2f} < Asian Low {self.asian_low:.2f}')
+                    self.sell_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
+                    self.daily_trades += 1
+        
+        # 3. End of Day (Close All)
+        elif hour >= self.params.trade_end_hour:
+            if self.position:
+                self.log("End of Day - Closing Positions")
+                self.close()
+            if self.order:
+                self.broker.cancel(self.order)

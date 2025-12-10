@@ -1,31 +1,35 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to the TradeLockerBot project will be documented in this file.
 
-## [1.0.1] - 2025-12-09
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-### Fixed
-- **TradeLocker Compatibility**: Removed `enum` module import which is not allowed by TradeLocker security policy
-- Replaced `MarketRegime` and `TrendDirection` Enum classes with string constants
-- Removed `datetime` module import (not needed)
-- Replaced emoji characters (⚠️, ✅, ❌) with ASCII text for encoding compatibility
+## [Unreleased]
 
-## [1.0.0] - 2025-12-09
+### Changed - MacdStrategy Enhancement (TradingLab Rules)
+- **Zero-line crossover filter**: Long entries now require MACD to cross above signal while both are below zero line; short entries require crossing below signal while both are above zero line (per TradingLab video methodology)
+- **200 EMA-based stop loss**: Stop loss now calculated dynamically based on distance to 200 EMA instead of fixed 20 pips, with configurable multiplier (`ema_sl_multiplier`) and minimum distance safeguard (`min_sl_distance`)
+- **Risk/Reward ratio**: Updated from 2.0:1 to 1.5:1 as per TradingLab strategy specification
+- **Enhanced logging**: Entry logs now include SL distance for better trade analysis
 
-### Added
-- **XAUUSDStrategy.py**: Complete multi-factor confluence backtesting strategy
-  - Regime detection using ADX + ATR ratio + EMA slope combination
-  - Multi-timeframe analysis (4H for trend direction, 15M for entries)
-  - Trending regime entries: Pullback to EMA21 with RSI confirmation
-  - Ranging regime entries: RSI overbought/oversold at swing levels
-  - Key level filter (round numbers, previous day H/L)
-  - Trailing stop system activated after 1R profit
-  - Risk management per FundedHero trading plan:
-    - 1% risk per trade ($25 on $2,500 account)
-    - Max 3 trades per day
-    - Self-imposed $75 daily loss limit
-    - Lot size consistency limits (0.03 - 0.12)
-  - 20% consistency rule tracking and violation reporting
-  - Backtest summary with Phase 1/2 target validation
+### Added - MacdStrategy Enhancement
+- Support/Resistance detection using swing high/low algorithm with configurable lookback period
+- Price action filter: Long entries require price near support level; short entries require price near resistance level
+- New parameters:
+  - `min_sl_distance` (10.0): Minimum SL distance as fallback when EMA distance is too small
+  - `ema_sl_multiplier` (1.0): Multiplier for EMA-based SL distance calculation
+  - `sr_lookback` (20): Number of bars to look back for swing high/low detection
+  - `sr_threshold` (5.0): Maximum price distance to S/R level for trade confirmation
+  - `use_sr_filter` (True): Toggle to enable/disable S/R filtering
+- Helper methods:
+  - `detect_sr_levels()`: Identifies support and resistance levels from recent price action
+  - `near_support()`: Checks if current price is within threshold of any support level
+  - `near_resistance()`: Checks if current price is within threshold of any resistance level
 
-- **Plan.md**: FundedHero $2.5K Challenge trading plan documentation
+### Removed
+- Fixed `sl_pips` parameter (replaced by dynamic EMA-based calculation)
+
+## [Earlier Versions]
+
+Previous changes were not tracked in this changelog.
