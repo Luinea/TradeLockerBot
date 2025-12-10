@@ -8,13 +8,14 @@ class MacdStrategy(bt.Strategy):
     Optimizations (2025-12-10):
     - min_sl_distance: 20 pips (increased from 10) for XAUUSD volatility
     - ema_sl_multiplier: 1.5x (increased from 1.0) for trend breathing room
+    - Zero-line filter: REMOVED to increase trade frequency (12-18/month target)
     
     Rules:
-    - LONG: MACD crosses above signal BELOW zero line + price above 200 EMA + near support
-    - SHORT: MACD crosses below signal ABOVE zero line + price below 200 EMA + near resistance
+    - LONG: MACD crosses above signal + price above 200 EMA
+    - SHORT: MACD crosses below signal + price below 200 EMA
     - Stop Loss: Max of (EMA distance * multiplier, min distance)
     - Take Profit: 1.5x risk/reward ratio
-    - Support/Resistance: Detected via swing high/low analysis
+    - Support/Resistance: Optional filter (default OFF)
     """
     
     params = (
@@ -240,28 +241,24 @@ class MacdStrategy(bt.Strategy):
         if self.params.use_sr_filter:
             self.detect_sr_levels()
 
-        # 5. Entry Logic with TradingLab Rules
+        # 5. Entry Logic - Simplified for More Trades
         # LONG Entry Conditions:
-        # 1. MACD crosses above signal BELOW zero line
-        # 2. Price is above 200 EMA
+        # 1. MACD crosses above signal (at any level)
+        # 2. Price is above 200 EMA (trend confirmation)
         # 3. Price is near support (if S/R filter enabled)
         long_condition = (
             self.crossover > 0 and                    # MACD bullish crossover
-            self.macd.macd[-1] < 0 and               # MACD was below zero before cross
-            self.macd.signal[-1] < 0 and             # Signal was below zero before cross
-            self.data.close[0] > self.ema[0] and     # Price above 200 EMA
+            self.data.close[0] > self.ema[0] and     # Price above 200 EMA (uptrend)
             (not self.params.use_sr_filter or self.near_support())  # Near support if filter enabled
         )
         
         # SHORT Entry Conditions:
-        # 1. MACD crosses below signal ABOVE zero line
-        # 2. Price is below 200 EMA
+        # 1. MACD crosses below signal (at any level)
+        # 2. Price is below 200 EMA (trend confirmation)
         # 3. Price is near resistance (if S/R filter enabled)
         short_condition = (
             self.crossover < 0 and                    # MACD bearish crossover
-            self.macd.macd[-1] > 0 and               # MACD was above zero before cross
-            self.macd.signal[-1] > 0 and             # Signal was above zero before cross
-            self.data.close[0] < self.ema[0] and     # Price below 200 EMA
+            self.data.close[0] < self.ema[0] and     # Price below 200 EMA (downtrend)
             (not self.params.use_sr_filter or self.near_resistance())  # Near resistance if filter enabled
         )
         

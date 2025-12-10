@@ -13,11 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed - MACD Strategy Parameter Optimization (2025-12-10)
 - **Minimum SL increased**: `min_sl_distance` from 10.0 to 20.0 pips to accommodate XAUUSD volatility on 15m timeframe
 - **EMA SL multiplier increased**: `ema_sl_multiplier` from 1.0 to 1.5 to provide more breathing room for trend pullbacks
-- **Rationale**: Backtest analysis (Feb 2025) showed 10-pip SL too tight:
-  - 64% stop loss hit rate (7/11 trades)
-  - 6/11 trades used minimum 10-pip SL with only 33% win rate
-  - Feb 25 disaster: 3 consecutive 10-pip SL losses totaling -$60.36
-  - Expected improvement: Win rate from 36% to 45-50% target
+- **Zero-line filter REMOVED**: MACD crossovers now allowed at any level (not just below/above zero) to increase trade frequency from 6 to 12-18 trades/month
+- **S/R filter default**: Changed to OFF (`use_sr_filter=False`) after testing showed it was too restrictive
+- **Rationale**: Backtest analysis (Feb 2025) showed:
+  - 10-pip SL too tight: 64% stop loss hit rate, only 33% win rate on minimum SL trades
+  - Zero-line filter too restrictive: Only 6 trades/month, limiting profitability
+  - With optimizations: 50% win rate, +2.04% ROI, 2.04% max drawdown
+  - Expected with zero-line removal: 12-18 trades/month, maintaining 45-50% win rate target
 
 ### Changed - MacdStrategy Enhancement (TradingLab Rules)
 - **Zero-line crossover filter**: Long entries now require MACD to cross above signal while both are below zero line; short entries require crossing below signal while both are above zero line (per TradingLab video methodology)
