@@ -32,8 +32,8 @@ class XauAdaptiveStrategy(bt.Strategy):
         ("adx_trend_enter", 30),   # ADX must exceed 30 to ENTER trending mode
         ("adx_trend_exit", 20),    # ADX must fall below 20 to EXIT trending mode
         # Dead Zone: ADX 20-30 = No new trades (prevents whipsaw)
-        ("adx_min_threshold", 15), # Don't trade AT ALL if ADX < 15 (market is dead)
-        ("atr_min_pips", 5.0),     # Don't trade if ATR < 5 pips (range too tight for scalping)
+        ("adx_min_threshold", 12), # Don't trade AT ALL if ADX < 12 (market is dead)
+        ("atr_min_pips", 3.0),     # Don't trade if ATR < 3 pips (range too tight for scalping)
         ("bb_period", 20),
         ("bb_dev", 2.0),
         
