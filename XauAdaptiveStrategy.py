@@ -20,11 +20,23 @@ class XauAdaptiveStrategy(bt.Strategy):
     """
     
     params = (
-        # === REGIME DETECTION ===
+        # === REGIME DETECTION (with Hysteresis) ===
         ("adx_period", 14),
-        ("adx_trend_threshold", 25),  # ADX > 25 = trending market
+        ("adx_trend_threshold", 30),  # ADX > 30 = confirmed trend (raised from 25)
+        ("adx_range_threshold", 20),  # ADX < 20 = confirmed range
+        # ADX 20-30 = "Dead Zone" - NO TRADES
         ("bb_period", 20),
         ("bb_dev", 2.0),
+        
+        # === EMA SLOPE FILTER ===
+        ("ema_slope_lookback", 5),  # Bars to measure slope
+        ("min_ema_slope", 0.5),  # Minimum slope for trend confirmation (price units)
+        ("use_slope_filter", True),  # Enable slope filter
+        
+        # === CHOPPINESS INDEX ===
+        ("chop_period", 14),
+        ("chop_threshold", 61.8),  # Chop > 61.8 = choppy/ranging market
+        ("use_chop_filter", True),  # Enable Choppiness Index filter
         
         # === TREND FOLLOWING (EMA Ribbon) ===
         ("ema_fast", 8),
@@ -91,6 +103,14 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         # === MACRO TREND FILTER ===
         self.ema_macro = bt.indicators.EMA(self.data.close, period=self.params.ema_macro)
+        
+        # === CHOPPINESS INDEX (Manual Calculation) ===
+        # Chop = 100 * LOG10(SUM(ATR, n) / (Highest(n) - Lowest(n))) / LOG10(n)
+        # High values (>61.8) = choppy/consolidating, Low (<38.2) = trending
+        self.highest = bt.indicators.Highest(self.data.high, period=self.params.chop_period)
+        self.lowest = bt.indicators.Lowest(self.data.low, period=self.params.chop_period)
+        self.tr = bt.indicators.TrueRange(self.data)
+        self.tr_sum = bt.indicators.SumN(self.tr, period=self.params.chop_period)
         
         # === HEIKIN-ASHI STATE ===
         self.ha_open = None
@@ -164,14 +184,63 @@ class XauAdaptiveStrategy(bt.Strategy):
         self.prev_ha_open = self.ha_open
         self.prev_ha_close = self.ha_close
 
+    def calculate_choppiness_index(self):
+        """Calculate Choppiness Index: 100 * LOG10(SUM(TR, n) / (High - Low)) / LOG10(n)"""
+        import math
+        try:
+            high_low_range = self.highest[0] - self.lowest[0]
+            if high_low_range <= 0:
+                return 50.0  # Neutral if no range
+            tr_sum = self.tr_sum[0]
+            chop = 100.0 * math.log10(tr_sum / high_low_range) / math.log10(self.params.chop_period)
+            return max(0, min(100, chop))  # Clamp to 0-100
+        except:
+            return 50.0
+
+    def calculate_ema_slope(self):
+        """Calculate slope of EMA50 over lookback period."""
+        try:
+            lookback = self.params.ema_slope_lookback
+            if len(self.ema_slow) > lookback:
+                slope = self.ema_slow[0] - self.ema_slow[-lookback]
+                return slope
+            return 0
+        except:
+            return 0
+
     def detect_regime(self):
-        """Detect market regime based on ADX."""
+        """
+        Detect market regime with anti-whipsaw filters:
+        1. ADX Hysteresis: >30 = Trend, <20 = Range, 20-30 = Dead Zone
+        2. EMA Slope Filter: EMA50 must be moving, not flat
+        3. Choppiness Index: >61.8 = Choppy (no trend trades)
+        """
         adx_val = self.adx.adx[0]
         
-        if adx_val > self.params.adx_trend_threshold:
-            return 'TRENDING'
+        # === FILTER 1: ADX Hysteresis ===
+        if adx_val >= self.params.adx_trend_threshold:  # ADX > 30
+            regime = 'TRENDING'
+        elif adx_val <= self.params.adx_range_threshold:  # ADX < 20
+            regime = 'RANGING'
         else:
-            return 'RANGING'
+            # Dead Zone (ADX 20-30) - NO TRADES
+            return 'DEAD_ZONE'
+        
+        # === FILTER 2: Choppiness Index ===
+        if self.params.use_chop_filter and regime == 'TRENDING':
+            chop = self.calculate_choppiness_index()
+            if chop > self.params.chop_threshold:  # >61.8 = choppy
+                self.log(f'CHOP FILTER: Chop={chop:.1f} > {self.params.chop_threshold} - Forcing DEAD_ZONE')
+                return 'DEAD_ZONE'
+        
+        # === FILTER 3: EMA Slope (for TRENDING only) ===
+        if self.params.use_slope_filter and regime == 'TRENDING':
+            slope = self.calculate_ema_slope()
+            if abs(slope) < self.params.min_ema_slope:  # EMA50 is flat
+                self.log(f'SLOPE FILTER: EMA50 slope={slope:.2f} < {self.params.min_ema_slope} - Forcing DEAD_ZONE')
+                return 'DEAD_ZONE'
+        
+        return regime
 
     def check_ema_stack(self):
         """Check EMA alignment for trend direction."""

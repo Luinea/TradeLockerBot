@@ -54,7 +54,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Price > EMA200: Only LONG signals allowed
   - Price < EMA200: Only SHORT signals allowed
   - Counter-trend signals now logged as "BLOCKED" for debugging
-- **Expected Impact**: Fewer losing trades during strong directional months### Added - EUR_USD Professional Trading Strategy (2025-12-10)
+- **Expected Impact**: Fewer losing trades during strong directional months
+
+### Fixed - XAU Adaptive Strategy Whipsaw Prevention (2025-12-15)
+- **Bug**: Strategy getting "chopped" in consolidating markets (e.g., Jan-Mar 2024) due to:
+  1. ADX temporarily spiking above 25 without sustained trends
+  2. EMA crossovers giving false signals when EMAs are flat
+  3. Binary regime switch with no buffer zone
+- **Root Cause Analysis**:
+  - Jan-Mar 2024: -4.11% ROI, 15.37% max DD (Image 1 failure)
+  - Jul-Sep 2025: +28.34% ROI, 8.54% max DD (Image 2 success)
+- **Fixes Implemented**:
+  1. **ADX Hysteresis (Dead Zone)**:
+     - Trend Mode: ADX > 30 (raised from 25)
+     - Range Mode: ADX < 20
+     - Dead Zone (20-30): NO TRADES
+  2. **EMA Slope Filter**:
+     - Requires EMA50 slope > 0.5 price units over 5 bars
+     - Flat EMA = no trend trades (forces DEAD_ZONE)
+  3. **Choppiness Index Filter**:
+     - Chop > 61.8 = choppy market, blocks trend trades
+     - Uses LOG10(SUM(TrueRange)/HighestHigh-LowestLow)
+- **New Parameters**: `adx_range_threshold`, `ema_slope_lookback`, `min_ema_slope`, `chop_period`, `chop_threshold`, `use_slope_filter`, `use_chop_filter`### Added - EUR_USD Professional Trading Strategy (2025-12-10)
 - **Feature**: Created comprehensive EUR_USD trading bot based on institutional-grade research
 - **Strategy Components**:
   - **Dual-Filter EMA System**: 200 EMA trend filter + 20/50 EMA crossover signals
