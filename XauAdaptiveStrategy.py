@@ -289,12 +289,19 @@ class XauAdaptiveStrategy(bt.Strategy):
         return self.params.asian_start_hour <= hour < self.params.asian_end_hour
 
     def calculate_position_size(self, sl_distance):
-        """Calculate position size based on risk."""
+        """Calculate position size based on risk, reduced in low-ADX environments."""
         if sl_distance <= 0:
             return 0
         risk_amount = self.broker.getvalue() * self.params.risk_per_trade_percent
         size = round(risk_amount / (sl_distance * self.params.contract_size), 2)
-        return min(size, self.params.max_lots)
+        size = min(size, self.params.max_lots)
+        
+        # OPTION C: Reduce position size 50% in ranging/uncertain markets
+        if self.current_regime == 'RANGING':
+            size = round(size * 0.5, 2)
+            self.log(f"REDUCED SIZE: ADX={self.adx.adx[0]:.1f} < 20, sizing halved to {size}")
+        
+        return size
 
     def next(self):
         # Calculate Heikin-Ashi
@@ -467,38 +474,37 @@ class XauAdaptiveStrategy(bt.Strategy):
                             entry_reason = f"ASIAN BREAKOUT DOWN: Price={price:.2f} < Range Low={self.asian_range_low:.2f}"
                             self.traded_breakout_today = True
             
-            # Mean Reversion: BB + RSI (if no breakout signal)
-            # NOTE: No HA filter here - mean reversion is counter-trend by nature
-            # RELAXED: Check if price is NEAR BB (within 50% of band width from mid) rather than outside
+            # OPTION B: MOMENTUM BREAKOUT (replaces mean reversion)
+            # Instead of fading BB extremes, TRADE WITH THEM when momentum confirms
+            # This catches breakouts like March 2024 instead of fighting them
             if signal is None and self.params.use_mean_reversion:
                 lower_bb = self.bb.lines.bot[0]
                 upper_bb = self.bb.lines.top[0]
                 mid_bb = self.bb.lines.mid[0]
                 rsi_val = self.rsi[0]
                 
-                # Calculate how close price is to the bands (0=mid, 1=at band, >1=outside)
-                band_width = upper_bb - lower_bb
-                if band_width > 0:
-                    # Distance from mid, normalized (0.5 = halfway to band)
-                    dist_from_mid = abs(price - mid_bb) / (band_width / 2)
-                else:
-                    dist_from_mid = 0
+                # Check for consecutive closes above/below BB (confirmation)
+                # Look back 2 bars for confirmation
+                prev_close1 = self.data.close[-1] if len(self.data.close) > 1 else price
+                prev_close2 = self.data.close[-2] if len(self.data.close) > 2 else price
+                prev_upper_bb = self.bb.lines.top[-1] if len(self.bb.lines.top) > 1 else upper_bb
+                prev_lower_bb = self.bb.lines.bot[-1] if len(self.bb.lines.bot) > 1 else lower_bb
                 
-                # Debug: Log when close to conditions (once per day)
+                # Debug logging
                 if not hasattr(self, '_mr_debug_date') or self._mr_debug_date != self.datas[0].datetime.date(0):
                     self._mr_debug_date = self.datas[0].datetime.date(0)
-                    self.log(f"MR DEBUG: Price={price:.2f}, LowerBB={lower_bb:.2f}, UpperBB={upper_bb:.2f}, RSI={rsi_val:.1f}, BandDist={dist_from_mid:.2f}")
+                    self.log(f"BREAKOUT DEBUG: Price={price:.2f}, UpperBB={upper_bb:.2f}, LowerBB={lower_bb:.2f}, RSI={rsi_val:.1f}")
                 
-                # LONG: Price in lower 25% of band + RSI < 45 (relaxed from 35)
-                if price < mid_bb and dist_from_mid > 0.5 and rsi_val < 45:
+                # LONG BREAKOUT: Price above upper BB for 2+ bars + RSI rising/bullish (>50)
+                if price > upper_bb and prev_close1 > prev_upper_bb and rsi_val > 50:
                     signal = 'LONG'
-                    entry_reason = f"MEAN REVERSION: Price={price:.2f} near LowerBB={lower_bb:.2f}, RSI={rsi_val:.1f}"
-                    self.is_mean_reversion_trade = True
+                    entry_reason = f"MOMENTUM BREAKOUT UP: Price={price:.2f} > UpperBB={upper_bb:.2f}, RSI={rsi_val:.1f}"
+                    self.is_mean_reversion_trade = True  # Use mid BB as TP (target the extension)
                 
-                # SHORT: Price in upper 25% of band + RSI > 55 (relaxed from 65)  
-                elif price > mid_bb and dist_from_mid > 0.5 and rsi_val > 55:
+                # SHORT BREAKOUT: Price below lower BB for 2+ bars + RSI falling/bearish (<50)
+                elif price < lower_bb and prev_close1 < prev_lower_bb and rsi_val < 50:
                     signal = 'SHORT'
-                    entry_reason = f"MEAN REVERSION: Price={price:.2f} near UpperBB={upper_bb:.2f}, RSI={rsi_val:.1f}"  
+                    entry_reason = f"MOMENTUM BREAKOUT DOWN: Price={price:.2f} < LowerBB={lower_bb:.2f}, RSI={rsi_val:.1f}"
                     self.is_mean_reversion_trade = True
         
         # === MACRO TREND FILTER (for trending regime) ===
@@ -520,13 +526,14 @@ class XauAdaptiveStrategy(bt.Strategy):
             if size <= 0:
                 return
             
-            # Mean reversion trades target the middle BB
-            mid_bb = self.bb.lines.mid[0]
+            # For momentum breakout trades, target ATR extension (continuation)
+            # For trend pullback trades, use R:R ratio
             
             if signal == 'LONG':
                 sl_price = price - sl_distance
                 if self.is_mean_reversion_trade:
-                    tp_price = mid_bb  # Target the mean
+                    # Momentum breakout: target 1.5x ATR extension (continuation move)
+                    tp_price = price + (sl_distance * 1.5)
                 else:
                     tp_price = price + (sl_distance * self.params.tp_risk_reward)
                 self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f} | Regime={self.current_regime}')
@@ -539,7 +546,8 @@ class XauAdaptiveStrategy(bt.Strategy):
             elif signal == 'SHORT':
                 sl_price = price + sl_distance
                 if self.is_mean_reversion_trade:
-                    tp_price = mid_bb  # Target the mean
+                    # Momentum breakout: target 1.5x ATR extension (continuation move)
+                    tp_price = price - (sl_distance * 1.5)
                 else:
                     tp_price = price - (sl_distance * self.params.tp_risk_reward)
                 self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f} | Regime={self.current_regime}')

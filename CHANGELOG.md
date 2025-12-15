@@ -7,14 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added - Mean Reversion for Ranging Markets (2025-12-15)
-- **Feature**: Added mean reversion strategy to `XauAdaptiveStrategy.py` for RANGING regime
-- **Logic**: When regime is RANGING and no Asian Breakout triggers:
-  - LONG: Price < Lower BB AND RSI < 35 (oversold)
-  - SHORT: Price > Upper BB AND RSI > 65 (overbought)
-- **Take Profit**: Mean reversion trades target the middle Bollinger Band (mean)
-- **Parameters**: Added `use_mean_reversion` (default: True)
-- **Benefit**: Provides trades in consolidating markets like 2024 (Jan-Mar)
+### Added - Momentum Breakout Strategy (2025-12-15)
+- **Feature**: Replaced mean reversion with MOMENTUM BREAKOUT for RANGING regime
+- **Logic**: Instead of fading BB extremes, now trades WITH confirmed breakouts:
+  - LONG: Price > Upper BB for 2+ bars AND RSI > 50 (bullish momentum)
+  - SHORT: Price < Lower BB for 2+ bars AND RSI < 50 (bearish momentum)
+- **Take Profit**: Targets 1.5x ATR extension (continuation move)
+- **Rationale**: 2024 Jan-Mar was consolidation→breakout, not true ranging. This captures breakouts like March 2024 rally.
+
+### Added - Regime-Based Position Sizing (2025-12-15)
+- **Feature**: Automatic 50% position size reduction in RANGING regime
+- **Logic**: When ADX < 20, position size is halved to limit losses in uncertain markets
+- **Benefit**: Preserves capital during choppy conditions while staying active
 
 ### Fixed - TIME EXIT Orphan Orders Bug (2025-12-15)
 - **Bug**: TIME EXIT closed positions but left SL/TP bracket orders active
