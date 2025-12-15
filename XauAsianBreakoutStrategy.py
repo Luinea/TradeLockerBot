@@ -213,8 +213,10 @@ class XauAsianBreakoutStrategy(bt.Strategy):
             tp_price = price + tp_dist
             self.log(f"BUY BREAKOUT: Price={price:.2f} > RangeHigh={self.range_high:.2f}")
             self.log(f"  Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}")
+            # Use Market order for entry (TradeLocker requirement)
             self.order = self.buy_bracket(
                 size=size,
+                exectype=bt.Order.Market,  # Entry must be Market, not Limit
                 limitprice=tp_price,
                 stopprice=sl_price
             )
@@ -226,8 +228,10 @@ class XauAsianBreakoutStrategy(bt.Strategy):
             tp_price = price - tp_dist
             self.log(f"SELL BREAKOUT: Price={price:.2f} < RangeLow={self.range_low:.2f}")
             self.log(f"  Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}")
+            # Use Market order for entry (TradeLocker requirement)
             self.order = self.sell_bracket(
                 size=size,
+                exectype=bt.Order.Market,  # Entry must be Market, not Limit
                 limitprice=tp_price,
                 stopprice=sl_price
             )
