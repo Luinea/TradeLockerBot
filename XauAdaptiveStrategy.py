@@ -472,7 +472,13 @@ class XauAdaptiveStrategy(bt.Strategy):
             if signal is None and self.params.use_mean_reversion:
                 lower_bb = self.bb.lines.bot[0]
                 upper_bb = self.bb.lines.top[0]
+                mid_bb = self.bb.lines.mid[0]
                 rsi_val = self.rsi[0]
+                
+                # Debug: Log when close to conditions (once per day)
+                if not hasattr(self, '_mr_debug_date') or self._mr_debug_date != self.datas[0].datetime.date(0):
+                    self._mr_debug_date = self.datas[0].datetime.date(0)
+                    self.log(f"MR DEBUG: Price={price:.2f}, LowerBB={lower_bb:.2f}, UpperBB={upper_bb:.2f}, RSI={rsi_val:.1f}")
                 
                 # LONG: Price below Lower BB + RSI oversold
                 if price < lower_bb and rsi_val < self.params.rsi_oversold:
