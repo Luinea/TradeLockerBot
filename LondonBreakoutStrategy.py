@@ -98,21 +98,22 @@ class LondonBreakoutStrategy(bt.Strategy):
             return
 
         if order.status in [order.Completed]:
-            # Track entry orders
-            if order.isbuy():
-                if self.entry_price is None:  # This is the market entry order
-                    self.entry_price = order.executed.price
-                    self.position_direction = 'LONG'
-                    self.highest_since_entry = order.executed.price
-                    self.trailing_active = False
-                    self.log(f'LONG Entry @ {self.entry_price:.2f}')
-            elif order.issell():
-                if self.entry_price is None:  # This is the market entry order
-                    self.entry_price = order.executed.price
-                    self.position_direction = 'SHORT'
-                    self.lowest_since_entry = order.executed.price
-                    self.trailing_active = False
-                    self.log(f'SHORT Entry @ {self.entry_price:.2f}')
+            # Track entry orders - ONLY market orders are real entries
+            if order.exectype == order.Market:
+                if order.isbuy():
+                    if self.entry_price is None:  # This is the market entry order
+                        self.entry_price = order.executed.price
+                        self.position_direction = 'LONG'
+                        self.highest_since_entry = order.executed.price
+                        self.trailing_active = False
+                        self.log(f'LONG Entry @ {self.entry_price:.2f}')
+                elif order.issell():
+                    if self.entry_price is None:  # This is the market entry order
+                        self.entry_price = order.executed.price
+                        self.position_direction = 'SHORT'
+                        self.lowest_since_entry = order.executed.price
+                        self.trailing_active = False
+                        self.log(f'SHORT Entry @ {self.entry_price:.2f}')
             
             # Track stop and limit orders from bracket
             if order.exectype == order.Stop:

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - XAU/USD Scalping Strategies Suite (2025-12-15)
+- **Feature**: Implemented 3 automated XAU/USD scalping strategies based on `Strat.md` research document
+- **Strategies**:
+  1. **XauMeanReversionStrategy.py** - Bollinger Bands + RSI + Stochastic confluence
+     - Entry: Price outside BB + RSI extreme (<30/>70) + Stochastic crossover in oversold/overbought zone
+     - Exit: Target = Middle Bollinger Band (mean reversion), SL = ATR * 1.5
+     - Optional `require_stoch_crossover` flag for strict/relaxed mode
+  2. **XauTrendFollowingStrategy.py** - EMA Ribbon (8/21/50) pullback entries
+     - Entry: EMA stack aligned + Price pulls back to 8-21 zone + Closes back in trend direction
+     - Exit: ATR-based trailing stop (ATR * 2.0)
+     - Captures "fat tail" moves during London/NY session
+  3. **XauHeikinAshiStrategy.py** - Heikin-Ashi + Parabolic SAR + EMA 200
+     - Entry: HA color change Red→Green (or Green→Red) + SAR flip + Price vs EMA200 filter
+     - Exit: Immediate close on HA color reversal
+- **Common Features**:
+  - FundedHero-compliant risk management (1% per trade, 6% max drawdown, $75 daily loss limit)
+  - London/NY Overlap time filter (13:00-17:00 GMT) for optimal spread conditions
+  - ATR-based dynamic position sizing
+  - TradeLocker `params_metadata` for UI configuration
+- **Test Files**: Created `test_xau_mean_reversion.py`, `test_xau_trend_following.py`, `test_xau_heikin_ashi.py`
+- **Verification**: Trend Following executed 5 trades (+0.06%), Mean Reversion executed 4 trades (-0.04%) with synthetic data
+
 ### Added - EUR_USD Professional Trading Strategy (2025-12-10)
 - **Feature**: Created comprehensive EUR_USD trading bot based on institutional-grade research
 - **Strategy Components**:
