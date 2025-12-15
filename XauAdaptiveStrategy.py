@@ -66,7 +66,8 @@ class XauAdaptiveStrategy(bt.Strategy):
         # === ATR & RISK ===
         ("atr_period", 14),
         ("atr_sl_multiplier", 2.0),  # WIDENED from 1.5 to give trades more room
-        ("tp_risk_reward", 1.5),    # REDUCED from 2.0 for more realistic TP hits
+        ("tp_risk_reward", 1.0),    # 1:1 R:R for scalping (faster wins)
+        ("max_hold_minutes", 60),   # Time-based exit: cut trade if no TP/SL in 60 mins
         
         # === RISK MANAGEMENT ===
         ("risk_per_trade_percent", 0.01),
@@ -133,6 +134,7 @@ class XauAdaptiveStrategy(bt.Strategy):
         self.current_regime = None
         self.locked_regime = None  # Hysteresis: remembers last confirmed regime
         self.last_trade_time = None  # Cooldown: time of last trade close
+        self.entry_time = None  # Time-based exit: when current trade was opened
 
     def log(self, txt, dt=None):
         if dt is None:
@@ -174,6 +176,9 @@ class XauAdaptiveStrategy(bt.Strategy):
             self.daily_pnl = trade.pnlcomm
             self.last_trade_date = current_date
             self.daily_trades = 0
+        
+        # Reset entry time (trade is now closed)
+        self.entry_time = None
 
     def calculate_heikin_ashi(self):
         """Calculate Heikin-Ashi candle and determine color."""
@@ -339,6 +344,19 @@ class XauAdaptiveStrategy(bt.Strategy):
             return
         if self.daily_trades >= self.params.max_daily_trades:
             return
+        
+        # === TIME-BASED EXIT (SCALPING OPTIMIZATION) ===
+        # Close position if held longer than max_hold_minutes without hitting TP/SL
+        if self.position and self.entry_time is not None:
+            from datetime import timedelta
+            current_time = self.datas[0].datetime.datetime(0)
+            hold_delta = timedelta(minutes=self.params.max_hold_minutes)
+            if current_time >= self.entry_time + hold_delta:
+                self.log(f"TIME EXIT: Position held > {self.params.max_hold_minutes} mins - closing at market")
+                self.close()
+                self.entry_time = None
+                return
+        
         if self.order or self.position:
             return
         if not self.is_trading_hours():
@@ -461,6 +479,7 @@ class XauAdaptiveStrategy(bt.Strategy):
                 self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f} | Regime={self.current_regime}')
                 self.log(f'  LONG: Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}')
                 self.buy_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
+                self.entry_time = self.datas[0].datetime.datetime(0)  # For time-based exit
                 self.daily_trades += 1
                 
             elif signal == 'SHORT':
@@ -469,6 +488,7 @@ class XauAdaptiveStrategy(bt.Strategy):
                 self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f} | Regime={self.current_regime}')
                 self.log(f'  SHORT: Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}')
                 self.sell_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
+                self.entry_time = self.datas[0].datetime.datetime(0)  # For time-based exit
                 self.daily_trades += 1
 
     # TradeLocker UI metadata
