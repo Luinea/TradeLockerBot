@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Test Files**: Created `test_xau_mean_reversion.py`, `test_xau_trend_following.py`, `test_xau_heikin_ashi.py`
 - **Verification**: Trend Following executed 5 trades (+0.06%), Mean Reversion executed 4 trades (-0.04%) with synthetic data
 
+### Added - XAU/USD Adaptive Combined Strategy (2025-12-15)
+- **Feature**: Created `XauAdaptiveStrategy.py` that combines all 3 strategies with automatic regime detection
+- **Regime Detection**:
+  - ADX > 25 = **TRENDING** regime: Uses EMA Ribbon pullback entries
+  - ADX < 25 = **RANGING** regime: Uses Bollinger+RSI mean reversion entries
+  - Heikin-Ashi color confirmation filter (optional)
+- **Benefits**: Single bot adapts to changing market conditions instead of needing manual strategy switching
+- **Verification**: 5 trades executed, +0.04% return on synthetic data with mixed regimes
 ### Added - EUR_USD Professional Trading Strategy (2025-12-10)
 - **Feature**: Created comprehensive EUR_USD trading bot based on institutional-grade research
 - **Strategy Components**:
