@@ -84,7 +84,7 @@ class XauAsianBreakoutStrategy(bt.Strategy):
         print(f'{dt}: {txt}')
 
     def start(self):
-        self.log("XAU Asian Breakout Strategy Started")
+        print("XAU Asian Breakout Strategy Started")
 
     def notify_order(self, order):
         if order.status in [order.Submitted, order.Accepted]:
