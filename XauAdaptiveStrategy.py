@@ -67,12 +67,18 @@ class XauAdaptiveStrategy(bt.Strategy):
         ("tp_risk_reward", 2.0),
         
         # === TIME-SEGMENTED SESSIONS ===
-        # Session-based strategy: Mean Reversion ONLY in Asian, Trend ONLY in NY
-        ("asian_start_hour", 1),   # 01:00 GMT
-        ("asian_end_hour", 9),     # 09:00 GMT (Range trading only)
-        ("ny_start_hour", 13),     # 13:00 GMT
-        ("ny_end_hour", 17),       # 17:00 GMT (Trend trading only)
+        # Session-based strategy with Asian Range Breakout
+        ("asian_start_hour", 1),   # 01:00 GMT - Asian range starts
+        ("asian_end_hour", 8),     # 08:00 GMT - Asian range ends
+        ("london_start_hour", 8),  # 08:00 GMT - London trading starts (breakouts)
+        ("london_end_hour", 17),   # 17:00 GMT - Trading ends
+        ("session_end_hour", 22),  # 22:00 GMT - Close all positions
         ("use_session_filter", True),  # Enable time-based strategy switching
+        
+        # === ASIAN RANGE BREAKOUT ===
+        ("enable_asian_breakout", True),  # Enable Asian Box breakout strategy
+        ("breakout_buffer", 0.5),  # Minimum pips above/below range for valid breakout
+        ("use_ema_trend_filter", True),  # Only take breakouts aligned with EMA50
         
         # === RISK MANAGEMENT ===
         ("risk_per_trade_percent", 0.01),
@@ -142,6 +148,13 @@ class XauAdaptiveStrategy(bt.Strategy):
         self.last_trade_date = None
         self.daily_peak_equity = 0.0  # Resets each trading day
         self.current_regime = None
+        
+        # === ASIAN RANGE BREAKOUT STATE ===
+        self.asian_range_high = None
+        self.asian_range_low = None
+        self.asian_range_formed = False
+        self.traded_long_today = False
+        self.traded_short_today = False
 
     def log(self, txt, dt=None):
         if dt is None:
@@ -302,23 +315,28 @@ class XauAdaptiveStrategy(bt.Strategy):
     def get_current_session(self):
         """
         Determine current trading session for time-segmented strategy.
-        Returns: 'ASIAN', 'NY', or 'OFF_HOURS'
+        Returns: 'ASIAN_RANGE', 'LONDON', 'NY', or 'OFF_HOURS'
         
-        Asian Session (01:00-09:00 GMT): Mean Reversion Only
-        NY Session (13:00-17:00 GMT): Trend Following Only
+        Asian Session (01:00-08:00 GMT): Define range (no trading, just measurement)
+        London Session (08:00-17:00 GMT): Breakout trading + Trend following
+        Session End (22:00): Close all positions
         """
         if not self.params.use_session_filter:
             return 'ANY'  # Allow any strategy
         try:
             hour = self.datas[0].datetime.datetime(0).hour
             
-            # Asian Session: Range trading only
+            # Asian Session: Range definition only (no trading)
             if self.params.asian_start_hour <= hour < self.params.asian_end_hour:
-                return 'ASIAN'
+                return 'ASIAN_RANGE'
             
-            # NY Session: Trend trading only
-            elif self.params.ny_start_hour <= hour < self.params.ny_end_hour:
-                return 'NY'
+            # London/NY Session: Breakout and trend trading
+            elif self.params.london_start_hour <= hour < self.params.london_end_hour:
+                return 'LONDON'
+            
+            # End of day
+            elif hour >= self.params.session_end_hour:
+                return 'SESSION_END'
             
             return 'OFF_HOURS'
         except:
@@ -327,7 +345,7 @@ class XauAdaptiveStrategy(bt.Strategy):
     def is_trading_hours(self):
         """Check if we're in any valid trading session."""
         session = self.get_current_session()
-        return session in ['ASIAN', 'NY', 'ANY']
+        return session in ['LONDON', 'ANY']
 
     def calculate_position_size(self, sl_distance):
         """Calculate position size based on risk."""
@@ -352,6 +370,12 @@ class XauAdaptiveStrategy(bt.Strategy):
             self.last_trade_date = current_date
             # Reset daily peak equity to allow recovery each day
             self.daily_peak_equity = current_equity
+            # Reset Asian range tracking for new day
+            self.asian_range_high = None
+            self.asian_range_low = None
+            self.asian_range_formed = False
+            self.traded_long_today = False
+            self.traded_short_today = False
         
         # Track daily peak (only increase, never decrease within the day)
         if current_equity > self.daily_peak_equity:
@@ -369,28 +393,83 @@ class XauAdaptiveStrategy(bt.Strategy):
             return
         if self.daily_trades >= self.params.max_daily_trades:
             return
+        
+        # === DETECT SESSION ===
+        session = self.get_current_session()
+        
+        # === ASIAN RANGE TRACKING (01:00 - 08:00 GMT) ===
+        if session == 'ASIAN_RANGE' and self.params.enable_asian_breakout:
+            # Track the high/low of Asian session to form the "box"
+            if self.asian_range_high is None:
+                self.asian_range_high = self.data.high[0]
+                self.asian_range_low = self.data.low[0]
+            else:
+                self.asian_range_high = max(self.asian_range_high, self.data.high[0])
+                self.asian_range_low = min(self.asian_range_low, self.data.low[0])
+            return  # No trading during Asian session, only range measurement
+        
+        # === MARK RANGE AS FORMED AT START OF LONDON SESSION ===
+        if session == 'LONDON' and not self.asian_range_formed:
+            if self.asian_range_high is not None and self.asian_range_low is not None:
+                self.asian_range_formed = True
+                range_size = self.asian_range_high - self.asian_range_low
+                self.log(f"ASIAN RANGE FORMED: High={self.asian_range_high:.2f}, Low={self.asian_range_low:.2f}, Size={range_size:.2f}")
+        
+        # === END OF DAY CLEANUP ===
+        if session == 'SESSION_END':
+            if self.position:
+                self.log("END OF DAY: Closing position")
+                self.close()
+            return
+        
+        # === SKIP IF OFF HOURS ===
+        if session == 'OFF_HOURS':
+            return
+        
+        # Skip if order pending or already in position
         if self.order or self.position:
             return
-        if not self.is_trading_hours():
-            return
-
-        # === DETECT SESSION AND REGIME ===
-        session = self.get_current_session()
-        self.current_regime = self.detect_regime()
-        
-        # === SESSION-STRATEGY ENFORCEMENT ===
-        # Asian Session: ONLY allow RANGING strategies
-        # NY Session: ONLY allow TRENDING strategies
-        if session == 'ASIAN' and self.current_regime == 'TRENDING':
-            self.current_regime = 'DEAD_ZONE'  # Block trends in Asian
-        elif session == 'NY' and self.current_regime == 'RANGING':
-            self.current_regime = 'DEAD_ZONE'  # Block ranges in NY
         
         price = self.data.close[0]
         atr_val = self.atr[0]
         
         signal = None
         entry_reason = ""
+        
+        # ========================================
+        # ASIAN RANGE BREAKOUT (Priority during London)
+        # ========================================
+        if session == 'LONDON' and self.params.enable_asian_breakout and self.asian_range_formed:
+            buffer = self.params.breakout_buffer
+            
+            # === BUY BREAKOUT ===
+            # 1. Price closes above Asian High + buffer
+            # 2. (Optional) Price > EMA50 for trend alignment
+            # 3. Haven't already taken a long today
+            ema_filter_long = not self.params.use_ema_trend_filter or price > self.ema_slow[0]
+            if price > (self.asian_range_high + buffer) and ema_filter_long:
+                if not self.traded_long_today:
+                    signal = 'LONG'
+                    entry_reason = f"ASIAN BREAKOUT UP: Price={price:.2f} > AsianHigh={self.asian_range_high:.2f}"
+                    self.traded_long_today = True
+            
+            # === SELL BREAKOUT ===
+            # 1. Price closes below Asian Low - buffer
+            # 2. (Optional) Price < EMA50 for trend alignment
+            # 3. Haven't already taken a short today
+            ema_filter_short = not self.params.use_ema_trend_filter or price < self.ema_slow[0]
+            if signal is None and price < (self.asian_range_low - buffer) and ema_filter_short:
+                if not self.traded_short_today:
+                    signal = 'SHORT'
+                    entry_reason = f"ASIAN BREAKOUT DOWN: Price={price:.2f} < AsianLow={self.asian_range_low:.2f}"
+                    self.traded_short_today = True
+        
+        # ========================================
+        # FALLBACK TO REGIME-BASED STRATEGIES
+        # (Only if no Asian breakout signal and breakout already taken today)
+        # ========================================
+        if signal is None and (self.traded_long_today or self.traded_short_today or not self.params.enable_asian_breakout):
+            self.current_regime = self.detect_regime()
         
         # === TRENDING REGIME: EMA Ribbon Pullback + DI Confirmation ===
         # Only active in NY Session (or ANY if session filter disabled)

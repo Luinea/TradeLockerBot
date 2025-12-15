@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Asian Range Breakout Integration (2025-12-15)
+- **Feature**: Integrated Asian Range Breakout strategy into `XauAdaptiveStrategy.py`
+- **Session Structure**:
+  - **Asian Session (01:00-08:00 GMT)**: Range measurement only (defines the "box")
+  - **London Session (08:00-17:00 GMT)**: Breakout trading + trend following
+  - **Session End (22:00 GMT)**: Close all positions
+- **Breakout Logic**:
+  - BUY: Price > Asian High + buffer AND Price > EMA50
+  - SELL: Price < Asian Low - buffer AND Price < EMA50
+  - One trade per direction per day (flags prevent overtrading)
+- **New Parameters**:
+  - `enable_asian_breakout`: Enable/disable the breakout strategy
+  - `breakout_buffer`: Minimum pips above/below range for valid breakout
+  - `use_ema_trend_filter`: Filter breakouts by EMA50 trend
+  - `london_start_hour`, `london_end_hour`, `session_end_hour`
+- **Fix**: Closed the "London Gap" - previous version missed 08:00-13:00 GMT trading window
+- **Benefits**: Captures the high-volatility London Open (08:00) momentum moves that Gold is known for
+
+
 ### Added - XAU/USD Scalping Strategies Suite (2025-12-15)
 - **Feature**: Implemented 3 automated XAU/USD scalping strategies based on `Strat.md` research document
 - **Strategies**:
