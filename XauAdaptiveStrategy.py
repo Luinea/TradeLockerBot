@@ -469,27 +469,36 @@ class XauAdaptiveStrategy(bt.Strategy):
             
             # Mean Reversion: BB + RSI (if no breakout signal)
             # NOTE: No HA filter here - mean reversion is counter-trend by nature
+            # RELAXED: Check if price is NEAR BB (within 50% of band width from mid) rather than outside
             if signal is None and self.params.use_mean_reversion:
                 lower_bb = self.bb.lines.bot[0]
                 upper_bb = self.bb.lines.top[0]
                 mid_bb = self.bb.lines.mid[0]
                 rsi_val = self.rsi[0]
                 
+                # Calculate how close price is to the bands (0=mid, 1=at band, >1=outside)
+                band_width = upper_bb - lower_bb
+                if band_width > 0:
+                    # Distance from mid, normalized (0.5 = halfway to band)
+                    dist_from_mid = abs(price - mid_bb) / (band_width / 2)
+                else:
+                    dist_from_mid = 0
+                
                 # Debug: Log when close to conditions (once per day)
                 if not hasattr(self, '_mr_debug_date') or self._mr_debug_date != self.datas[0].datetime.date(0):
                     self._mr_debug_date = self.datas[0].datetime.date(0)
-                    self.log(f"MR DEBUG: Price={price:.2f}, LowerBB={lower_bb:.2f}, UpperBB={upper_bb:.2f}, RSI={rsi_val:.1f}")
+                    self.log(f"MR DEBUG: Price={price:.2f}, LowerBB={lower_bb:.2f}, UpperBB={upper_bb:.2f}, RSI={rsi_val:.1f}, BandDist={dist_from_mid:.2f}")
                 
-                # LONG: Price below Lower BB + RSI oversold
-                if price < lower_bb and rsi_val < self.params.rsi_oversold:
+                # LONG: Price in lower 25% of band + RSI < 45 (relaxed from 35)
+                if price < mid_bb and dist_from_mid > 0.5 and rsi_val < 45:
                     signal = 'LONG'
-                    entry_reason = f"MEAN REVERSION: Price={price:.2f} < LowerBB={lower_bb:.2f}, RSI={rsi_val:.1f}"
+                    entry_reason = f"MEAN REVERSION: Price={price:.2f} near LowerBB={lower_bb:.2f}, RSI={rsi_val:.1f}"
                     self.is_mean_reversion_trade = True
                 
-                # SHORT: Price above Upper BB + RSI overbought
-                elif price > upper_bb and rsi_val > self.params.rsi_overbought:
+                # SHORT: Price in upper 25% of band + RSI > 55 (relaxed from 65)  
+                elif price > mid_bb and dist_from_mid > 0.5 and rsi_val > 55:
                     signal = 'SHORT'
-                    entry_reason = f"MEAN REVERSION: Price={price:.2f} > UpperBB={upper_bb:.2f}, RSI={rsi_val:.1f}"  
+                    entry_reason = f"MEAN REVERSION: Price={price:.2f} near UpperBB={upper_bb:.2f}, RSI={rsi_val:.1f}"  
                     self.is_mean_reversion_trade = True
         
         # === MACRO TREND FILTER (for trending regime) ===
