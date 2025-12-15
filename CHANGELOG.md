@@ -37,7 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Heikin-Ashi color confirmation filter (optional)
 - **Benefits**: Single bot adapts to changing market conditions instead of needing manual strategy switching
 - **Verification**: 5 trades executed, +0.04% return on synthetic data with mixed regimes
-### Added - EUR_USD Professional Trading Strategy (2025-12-10)
+
+### Fixed - XAU Adaptive Strategy Permanent Drawdown Lock (2025-12-15)
+- **Bug**: Strategy halted permanently once 6% drawdown hit - never recovered on subsequent days
+- **Impact**: "!!! MAX DRAWDOWN 6.51% - HALTING !!!" message repeated indefinitely through Nov 28 → Dec 12+
+- **Root Cause**: `peak_equity` was set once at strategy start and never reset, meaning once drawdown exceeded threshold the strategy was locked forever
+- **Fix**: Changed to `daily_peak_equity` that resets at the start of each trading day
+  - Moved daily reset logic BEFORE drawdown check to ensure fresh start each day
+  - Now halts for the current day only, resumes trading with a fresh peak on the next day
+- **Expected Impact**: Strategy can now recover from drawdown and continue trading the following day### Added - EUR_USD Professional Trading Strategy (2025-12-10)
 - **Feature**: Created comprehensive EUR_USD trading bot based on institutional-grade research
 - **Strategy Components**:
   - **Dual-Filter EMA System**: 200 EMA trend filter + 20/50 EMA crossover signals

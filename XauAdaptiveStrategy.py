@@ -101,7 +101,7 @@ class XauAdaptiveStrategy(bt.Strategy):
         self.daily_trades = 0
         self.daily_pnl = 0.0
         self.last_trade_date = None
-        self.peak_equity = 0.0
+        self.daily_peak_equity = 0.0  # Resets each trading day
         self.current_regime = None
 
     def log(self, txt, dt=None):
@@ -117,7 +117,7 @@ class XauAdaptiveStrategy(bt.Strategy):
 
     def start(self):
         self.log("XAU Adaptive Strategy Started")
-        self.peak_equity = self.broker.getvalue()
+        self.daily_peak_equity = self.broker.getvalue()
 
     def notify_order(self, order):
         if order.status in [order.Submitted, order.Accepted]:
@@ -209,21 +209,27 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         # === RISK MANAGEMENT ===
         current_equity = self.broker.getvalue()
-        if current_equity > self.peak_equity:
-            self.peak_equity = current_equity
         
-        drawdown_pct = (self.peak_equity - current_equity) / self.peak_equity
-        if drawdown_pct > self.params.max_drawdown_percent:
-            self.log(f"!!! MAX DRAWDOWN {drawdown_pct*100:.2f}% - HALTING !!!")
-            if self.position:
-                self.close()
-            return
-
+        # Daily reset - MUST happen before drawdown check
         current_date = self.datas[0].datetime.date(0)
         if self.last_trade_date != current_date:
             self.daily_trades = 0
             self.daily_pnl = 0.0
             self.last_trade_date = current_date
+            # Reset daily peak equity to allow recovery each day
+            self.daily_peak_equity = current_equity
+        
+        # Track daily peak (only increase, never decrease within the day)
+        if current_equity > self.daily_peak_equity:
+            self.daily_peak_equity = current_equity
+        
+        # Check daily drawdown
+        drawdown_pct = (self.daily_peak_equity - current_equity) / self.daily_peak_equity
+        if drawdown_pct > self.params.max_drawdown_percent:
+            self.log(f"!!! DAILY DRAWDOWN {drawdown_pct*100:.2f}% - Halting for today !!!")
+            if self.position:
+                self.close()
+            return
 
         if self.daily_pnl <= -self.params.max_daily_loss:
             return
