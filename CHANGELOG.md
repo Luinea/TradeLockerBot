@@ -107,7 +107,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   3. **Relaxed RSI Levels for Gold**:
      - Oversold: 30 → 35 (catches more opportunities)
      - Overbought: 70 → 65
-- **New Parameters**: `bb_slope_threshold` (1.5), updated `min_bb_width` (0.002)### Added - EUR_USD Professional Trading Strategy (2025-12-10)
+- **New Parameters**: `bb_slope_threshold` (1.5), updated `min_bb_width` (0.002)
+
+### Added - XAU Adaptive Strategy Time-Segmented Sessions (2025-12-15)
+- **Problem**: Running Mean Reversion during NY Session (13:00-17:00) is suicidal - this is breakout time
+- **Problem**: ADX > 30 is too late - by then the trend has moved 50-80 pips
+- **Solution - Time-Based Strategy Segregation**:
+  - **Asian Session (01:00-09:00 GMT)**: RANGING strategy ONLY (banks closed = safer ranges)
+  - **NY Session (13:00-17:00 GMT)**: TRENDING strategy ONLY (high volatility = breakouts)
+  - Session filter enforces correct strategy per time window
+- **Solution - Faster Trend Entry**:
+  - Lowered ADX threshold: 30 → 20 (catch moves earlier)
+  - Added DI+/DI- confirmation (PlusDI > MinusDI for bullish, vice versa)
+  - Now enters trends AS they start, not after 50 pips
+- **New Parameters**: `asian_start_hour`, `asian_end_hour`, `ny_start_hour`, `ny_end_hour`, `use_session_filter`
+- **New Indicators**: PlusDI, MinusDI for directional confirmation### Added - EUR_USD Professional Trading Strategy (2025-12-10)
 - **Feature**: Created comprehensive EUR_USD trading bot based on institutional-grade research
 - **Strategy Components**:
   - **Dual-Filter EMA System**: 200 EMA trend filter + 20/50 EMA crossover signals

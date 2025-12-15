@@ -22,9 +22,9 @@ class XauAdaptiveStrategy(bt.Strategy):
     params = (
         # === REGIME DETECTION (with Hysteresis) ===
         ("adx_period", 14),
-        ("adx_trend_threshold", 30),  # ADX > 30 = confirmed trend (raised from 25)
-        ("adx_range_threshold", 20),  # ADX < 20 = confirmed range
-        # ADX 20-30 = "Dead Zone" - NO TRADES
+        ("adx_trend_threshold", 20),  # Lowered from 30 to catch trends early
+        ("adx_range_threshold", 15),  # Only range if ADX very low
+        # ADX 15-20 = "Dead Zone" - NO TRADES
         ("bb_period", 20),
         ("bb_dev", 2.0),
         
@@ -66,10 +66,13 @@ class XauAdaptiveStrategy(bt.Strategy):
         ("atr_sl_multiplier", 1.5),
         ("tp_risk_reward", 2.0),
         
-        # === TIME FILTER ===
-        ("trade_start_hour", 13),
-        ("trade_end_hour", 17),
-        ("use_time_filter", True),
+        # === TIME-SEGMENTED SESSIONS ===
+        # Session-based strategy: Mean Reversion ONLY in Asian, Trend ONLY in NY
+        ("asian_start_hour", 1),   # 01:00 GMT
+        ("asian_end_hour", 9),     # 09:00 GMT (Range trading only)
+        ("ny_start_hour", 13),     # 13:00 GMT
+        ("ny_end_hour", 17),       # 17:00 GMT (Trend trading only)
+        ("use_session_filter", True),  # Enable time-based strategy switching
         
         # === RISK MANAGEMENT ===
         ("risk_per_trade_percent", 0.01),
@@ -90,6 +93,10 @@ class XauAdaptiveStrategy(bt.Strategy):
         self.bb = bt.indicators.BollingerBands(
             self.data.close, period=self.params.bb_period, devfactor=self.params.bb_dev
         )
+        
+        # === DIRECTIONAL INDICATORS (for faster trend confirmation) ===
+        self.plus_di = bt.indicators.PlusDI(self.data, period=self.params.adx_period)
+        self.minus_di = bt.indicators.MinusDI(self.data, period=self.params.adx_period)
         
         # === TREND FOLLOWING INDICATORS ===
         self.ema_fast = bt.indicators.EMA(self.data.close, period=self.params.ema_fast)
@@ -292,14 +299,35 @@ class XauAdaptiveStrategy(bt.Strategy):
             return price_high >= fast and price_high <= medium
         return False
 
-    def is_trading_hours(self):
-        if not self.params.use_time_filter:
-            return True
+    def get_current_session(self):
+        """
+        Determine current trading session for time-segmented strategy.
+        Returns: 'ASIAN', 'NY', or 'OFF_HOURS'
+        
+        Asian Session (01:00-09:00 GMT): Mean Reversion Only
+        NY Session (13:00-17:00 GMT): Trend Following Only
+        """
+        if not self.params.use_session_filter:
+            return 'ANY'  # Allow any strategy
         try:
             hour = self.datas[0].datetime.datetime(0).hour
-            return self.params.trade_start_hour <= hour < self.params.trade_end_hour
+            
+            # Asian Session: Range trading only
+            if self.params.asian_start_hour <= hour < self.params.asian_end_hour:
+                return 'ASIAN'
+            
+            # NY Session: Trend trading only
+            elif self.params.ny_start_hour <= hour < self.params.ny_end_hour:
+                return 'NY'
+            
+            return 'OFF_HOURS'
         except:
-            return False
+            return 'OFF_HOURS'
+    
+    def is_trading_hours(self):
+        """Check if we're in any valid trading session."""
+        session = self.get_current_session()
+        return session in ['ASIAN', 'NY', 'ANY']
 
     def calculate_position_size(self, sl_distance):
         """Calculate position size based on risk."""
@@ -346,8 +374,17 @@ class XauAdaptiveStrategy(bt.Strategy):
         if not self.is_trading_hours():
             return
 
-        # === DETECT REGIME ===
+        # === DETECT SESSION AND REGIME ===
+        session = self.get_current_session()
         self.current_regime = self.detect_regime()
+        
+        # === SESSION-STRATEGY ENFORCEMENT ===
+        # Asian Session: ONLY allow RANGING strategies
+        # NY Session: ONLY allow TRENDING strategies
+        if session == 'ASIAN' and self.current_regime == 'TRENDING':
+            self.current_regime = 'DEAD_ZONE'  # Block trends in Asian
+        elif session == 'NY' and self.current_regime == 'RANGING':
+            self.current_regime = 'DEAD_ZONE'  # Block ranges in NY
         
         price = self.data.close[0]
         atr_val = self.atr[0]
@@ -355,34 +392,40 @@ class XauAdaptiveStrategy(bt.Strategy):
         signal = None
         entry_reason = ""
         
-        # === TRENDING REGIME: EMA Ribbon Pullback ===
+        # === TRENDING REGIME: EMA Ribbon Pullback + DI Confirmation ===
+        # Only active in NY Session (or ANY if session filter disabled)
         if self.current_regime == 'TRENDING':
             trend = self.check_ema_stack()
+            
+            # DI Confirmation: DI+ > DI- for bullish, DI- > DI+ for bearish
+            di_bullish = self.plus_di[0] > self.minus_di[0]
+            di_bearish = self.minus_di[0] > self.plus_di[0]
+            
             if trend:
                 if self.in_pullback_zone_check(trend):
                     self.in_pullback_zone = True
                     self.pullback_direction = trend
                 
-                # Long entry
+                # Long entry - require DI+ > DI- for confirmation
                 if self.in_pullback_zone and self.pullback_direction == 'BULLISH':
-                    if price > self.ema_fast[0]:
+                    if price > self.ema_fast[0] and di_bullish:
                         # HA filter
                         if not self.params.use_ha_filter or self.ha_color == 'GREEN':
                             signal = 'LONG'
-                            entry_reason = f"TREND: Pullback complete, EMA8={self.ema_fast[0]:.2f}"
+                            entry_reason = f"NY TREND: Pullback + DI+>DI-, EMA8={self.ema_fast[0]:.2f}"
                             self.in_pullback_zone = False
                 
-                # Short entry
+                # Short entry - require DI- > DI+ for confirmation
                 elif self.in_pullback_zone and self.pullback_direction == 'BEARISH':
-                    if price < self.ema_fast[0]:
+                    if price < self.ema_fast[0] and di_bearish:
                         if not self.params.use_ha_filter or self.ha_color == 'RED':
                             signal = 'SHORT'
-                            entry_reason = f"TREND: Pullback complete, EMA8={self.ema_fast[0]:.2f}"
+                            entry_reason = f"NY TREND: Pullback + DI->DI+, EMA8={self.ema_fast[0]:.2f}"
                             self.in_pullback_zone = False
         
         # === RANGING REGIME: Mean Reversion with Wick Rejection ===
-        # FIX: Don't buy when price closes OUTSIDE BB (that's a breakout/walk)
-        # Instead: Buy when price DIPS below but CLOSES back inside (rejection)
+        # ONLY ACTIVE IN ASIAN SESSION (01:00-09:00 GMT)
+        # Uses wick rejection pattern: price dips outside BB but closes back inside
         elif self.current_regime == 'RANGING':
             lower_bb = self.bb.lines.bot[0]
             upper_bb = self.bb.lines.top[0]
@@ -409,7 +452,7 @@ class XauAdaptiveStrategy(bt.Strategy):
                     if rsi_val < self.params.rsi_oversold and stoch_k > stoch_d:
                         if not self.params.use_ha_filter or self.ha_color == 'GREEN':
                             signal = 'LONG'
-                            entry_reason = f"RANGE: Wick Rejection (Low<BB, Close>BB), RSI={rsi_val:.1f}"
+                            entry_reason = f"ASIA RANGE: Wick Rejection (Low<BB, Close>BB), RSI={rsi_val:.1f}"
                 
                 # === SHORT: WICK REJECTION PATTERN ===
                 # 1. Candle's HIGH poked above Upper BB
@@ -418,7 +461,7 @@ class XauAdaptiveStrategy(bt.Strategy):
                     if rsi_val > self.params.rsi_overbought and stoch_k < stoch_d:
                         if not self.params.use_ha_filter or self.ha_color == 'RED':
                             signal = 'SHORT'
-                            entry_reason = f"RANGE: Wick Rejection (High>BB, Close<BB), RSI={rsi_val:.1f}"
+                            entry_reason = f"ASIA RANGE: Wick Rejection (High>BB, Close<BB), RSI={rsi_val:.1f}"
             else:
                 # Bands are trending - skip mean reversion
                 pass

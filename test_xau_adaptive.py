@@ -71,8 +71,8 @@ def generate_adaptive_data():
 def run_test():
     cerebro = bt.Cerebro()
     
-    # Disable time filter and HA filter for synthetic data
-    cerebro.addstrategy(XauAdaptiveStrategy, use_time_filter=False, use_ha_filter=False)
+    # Disable session filter and HA filter for synthetic data
+    cerebro.addstrategy(XauAdaptiveStrategy, use_session_filter=False, use_ha_filter=False)
     
     df = generate_adaptive_data()
     df['datetime'] = pd.to_datetime(df['datetime'])
