@@ -121,7 +121,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added DI+/DI- confirmation (PlusDI > MinusDI for bullish, vice versa)
   - Now enters trends AS they start, not after 50 pips
 - **New Parameters**: `asian_start_hour`, `asian_end_hour`, `ny_start_hour`, `ny_end_hour`, `use_session_filter`
-- **New Indicators**: PlusDI, MinusDI for directional confirmation### Added - EUR_USD Professional Trading Strategy (2025-12-10)
+- **New Indicators**: PlusDI, MinusDI for directional confirmation
+
+### Added - XAU Asian Range Breakout Strategy (2025-12-15)
+- **New File**: `XauAsianBreakoutStrategy.py`
+- **Why**: Complex Adaptive Strategy over-filtered (-17.37% ROI) - simpler is better for Gold
+- **Strategy Logic**:
+  1. **Phase 1 (01:00-08:00 GMT)**: Measure Asian session High/Low → creates "The Box"
+  2. **Phase 2 (08:00-17:00 GMT)**: Trade breakouts of the box
+     - BUY: Price closes above Asian High AND Price > EMA50
+     - SELL: Price closes below Asian Low AND Price < EMA50
+  3. **Phase 3 (22:00 GMT)**: Close all positions, reset for next day
+- **Key Advantages**:
+  - Catches London Open momentum (most profitable time for Gold)
+  - Avoids chop naturally (price stays in box = no trades)
+  - Simple EMA50 filter prevents fakeouts
+  - Higher R:R (1:3) for trend-following breakouts
+- **Risk Management**: 2% risk per trade, max 2 trades/day, $100 daily loss limit### Added - EUR_USD Professional Trading Strategy (2025-12-10)
 - **Feature**: Created comprehensive EUR_USD trading bot based on institutional-grade research
 - **Strategy Components**:
   - **Dual-Filter EMA System**: 200 EMA trend filter + 20/50 EMA crossover signals
