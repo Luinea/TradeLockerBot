@@ -67,11 +67,12 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         # === RISK MANAGEMENT ===
         ("risk_per_trade_percent", 0.01),
-        ("max_daily_trades", 3),
+        ("max_daily_trades", 2),  # Reduced from 3 to be more selective
         ("max_daily_loss", 75.0),
         ("max_drawdown_percent", 0.06),
         ("max_lots", 0.5),
         ("contract_size", 100),
+        ("cooldown_minutes", 30),  # Wait 30 mins between trades to let market reset
         
         # === TREND DIRECTION FILTER ===
         ("ema_macro", 200),  # EMA 200 for macro trend
@@ -128,6 +129,7 @@ class XauAdaptiveStrategy(bt.Strategy):
         self.daily_peak_equity = 0.0
         self.current_regime = None
         self.locked_regime = None  # Hysteresis: remembers last confirmed regime
+        self.last_trade_time = None  # Cooldown: time of last trade close
 
     def log(self, txt, dt=None):
         if dt is None:
@@ -158,6 +160,10 @@ class XauAdaptiveStrategy(bt.Strategy):
         if not trade.isclosed:
             return
         self.log(f'TRADE PROFIT: ${trade.pnlcomm:.2f} [Regime: {self.current_regime}]')
+        
+        # Record time of trade close for cooldown
+        self.last_trade_time = self.datas[0].datetime.datetime(0)
+        
         current_date = self.datas[0].datetime.date(0)
         if self.last_trade_date == current_date:
             self.daily_pnl += trade.pnlcomm
@@ -334,6 +340,15 @@ class XauAdaptiveStrategy(bt.Strategy):
             return
         if not self.is_trading_hours():
             return
+        
+        # === COOLDOWN CHECK ===
+        # Wait at least X minutes after last trade before entering new one
+        if self.last_trade_time is not None:
+            from datetime import timedelta
+            current_time = self.datas[0].datetime.datetime(0)
+            cooldown_delta = timedelta(minutes=self.params.cooldown_minutes)
+            if current_time < self.last_trade_time + cooldown_delta:
+                return  # Still in cooldown period
 
         # === DETECT REGIME ===
         self.current_regime = self.detect_regime()
