@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Mean Reversion for Ranging Markets (2025-12-15)
+- **Feature**: Added mean reversion strategy to `XauAdaptiveStrategy.py` for RANGING regime
+- **Logic**: When regime is RANGING and no Asian Breakout triggers:
+  - LONG: Price < Lower BB AND RSI < 35 (oversold)
+  - SHORT: Price > Upper BB AND RSI > 65 (overbought)
+- **Take Profit**: Mean reversion trades target the middle Bollinger Band (mean)
+- **Parameters**: Added `use_mean_reversion` (default: True)
+- **Benefit**: Provides trades in consolidating markets like 2024 (Jan-Mar)
+
+### Fixed - TIME EXIT Orphan Orders Bug (2025-12-15)
+- **Bug**: TIME EXIT closed positions but left SL/TP bracket orders active
+- **Impact**: Orphan orders triggered unintended trades, causing -21% ROI loss
+- **Fix**: Cancel all bracket orders before closing position on TIME EXIT
+
+
 ### Added - Asian Range Breakout Integration (2025-12-15)
 - **Feature**: Integrated Asian Range Breakout strategy into `XauAdaptiveStrategy.py`
 - **Session Structure**:

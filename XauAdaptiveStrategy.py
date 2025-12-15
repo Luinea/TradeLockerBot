@@ -81,6 +81,9 @@ class XauAdaptiveStrategy(bt.Strategy):
         # === TREND DIRECTION FILTER ===
         ("ema_macro", 200),  # EMA 200 for macro trend
         ("trade_with_trend_only", True),  # Only long above EMA200, short below
+        
+        # === MEAN REVERSION (RANGING REGIME) ===
+        ("use_mean_reversion", True),  # Enable BB+RSI entries in ranging markets
     )
 
     def __init__(self):
@@ -136,6 +139,7 @@ class XauAdaptiveStrategy(bt.Strategy):
         self.locked_regime = None  # Hysteresis: remembers last confirmed regime
         self.last_trade_time = None  # Cooldown: time of last trade close
         self.entry_time = None  # Time-based exit: when current trade was opened
+        self.is_mean_reversion_trade = False  # Flag to use middle BB as TP
 
     def log(self, txt, dt=None):
         if dt is None:
@@ -438,28 +442,50 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         # =====================================================
         # RANGING REGIME: Use Asian Range Breakout Strategy
-        # This is the "choppy market" solution
+        # OR Mean Reversion (BB + RSI) if enabled
         # =====================================================
-        elif self.current_regime == 'RANGING' and self.asian_range_formed and not self.traded_breakout_today:
-            buffer = self.params.breakout_buffer
+        elif self.current_regime == 'RANGING':
+            # Try Asian Breakout first (if conditions met)
+            if self.asian_range_formed and not self.traded_breakout_today:
+                buffer = self.params.breakout_buffer
+                
+                # Long breakout - price breaks above Asian high
+                if price > (self.asian_range_high + buffer):
+                    if not self.params.use_ha_filter or self.ha_color == 'GREEN':
+                        # Check macro trend alignment
+                        if not self.params.trade_with_trend_only or price > self.ema_macro[0]:
+                            signal = 'LONG'
+                            entry_reason = f"ASIAN BREAKOUT UP: Price={price:.2f} > Range High={self.asian_range_high:.2f}"
+                            self.traded_breakout_today = True
+                
+                # Short breakout - price breaks below Asian low
+                elif price < (self.asian_range_low - buffer):
+                    if not self.params.use_ha_filter or self.ha_color == 'RED':
+                        # Check macro trend alignment
+                        if not self.params.trade_with_trend_only or price < self.ema_macro[0]:
+                            signal = 'SHORT'
+                            entry_reason = f"ASIAN BREAKOUT DOWN: Price={price:.2f} < Range Low={self.asian_range_low:.2f}"
+                            self.traded_breakout_today = True
             
-            # Long breakout - price breaks above Asian high
-            if price > (self.asian_range_high + buffer):
-                if not self.params.use_ha_filter or self.ha_color == 'GREEN':
-                    # Check macro trend alignment
-                    if not self.params.trade_with_trend_only or price > self.ema_macro[0]:
+            # Mean Reversion: BB + RSI (if no breakout signal)
+            if signal is None and self.params.use_mean_reversion:
+                lower_bb = self.bb.lines.bot[0]
+                upper_bb = self.bb.lines.top[0]
+                rsi_val = self.rsi[0]
+                
+                # LONG: Price below Lower BB + RSI oversold
+                if price < lower_bb and rsi_val < self.params.rsi_oversold:
+                    if not self.params.use_ha_filter or self.ha_color == 'GREEN':
                         signal = 'LONG'
-                        entry_reason = f"ASIAN BREAKOUT UP: Price={price:.2f} > Range High={self.asian_range_high:.2f}"
-                        self.traded_breakout_today = True
-            
-            # Short breakout - price breaks below Asian low
-            elif price < (self.asian_range_low - buffer):
-                if not self.params.use_ha_filter or self.ha_color == 'RED':
-                    # Check macro trend alignment
-                    if not self.params.trade_with_trend_only or price < self.ema_macro[0]:
+                        entry_reason = f"MEAN REVERSION: Price={price:.2f} < LowerBB={lower_bb:.2f}, RSI={rsi_val:.1f}"
+                        self.is_mean_reversion_trade = True
+                
+                # SHORT: Price above Upper BB + RSI overbought
+                elif price > upper_bb and rsi_val > self.params.rsi_overbought:
+                    if not self.params.use_ha_filter or self.ha_color == 'RED':
                         signal = 'SHORT'
-                        entry_reason = f"ASIAN BREAKOUT DOWN: Price={price:.2f} < Range Low={self.asian_range_low:.2f}"
-                        self.traded_breakout_today = True
+                        entry_reason = f"MEAN REVERSION: Price={price:.2f} > UpperBB={upper_bb:.2f}, RSI={rsi_val:.1f}"  
+                        self.is_mean_reversion_trade = True
         
         # === MACRO TREND FILTER (for trending regime) ===
         if signal and self.current_regime == 'TRENDING' and self.params.trade_with_trend_only:
@@ -480,23 +506,34 @@ class XauAdaptiveStrategy(bt.Strategy):
             if size <= 0:
                 return
             
+            # Mean reversion trades target the middle BB
+            mid_bb = self.bb.lines.mid[0]
+            
             if signal == 'LONG':
                 sl_price = price - sl_distance
-                tp_price = price + (sl_distance * self.params.tp_risk_reward)
+                if self.is_mean_reversion_trade:
+                    tp_price = mid_bb  # Target the mean
+                else:
+                    tp_price = price + (sl_distance * self.params.tp_risk_reward)
                 self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f} | Regime={self.current_regime}')
                 self.log(f'  LONG: Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}')
                 self.bracket_orders = self.buy_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
                 self.entry_time = self.datas[0].datetime.datetime(0)  # For time-based exit
                 self.daily_trades += 1
+                self.is_mean_reversion_trade = False  # Reset flag
                 
             elif signal == 'SHORT':
                 sl_price = price + sl_distance
-                tp_price = price - (sl_distance * self.params.tp_risk_reward)
+                if self.is_mean_reversion_trade:
+                    tp_price = mid_bb  # Target the mean
+                else:
+                    tp_price = price - (sl_distance * self.params.tp_risk_reward)
                 self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f} | Regime={self.current_regime}')
                 self.log(f'  SHORT: Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}')
                 self.bracket_orders = self.sell_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
                 self.entry_time = self.datas[0].datetime.datetime(0)  # For time-based exit
                 self.daily_trades += 1
+                self.is_mean_reversion_trade = False  # Reset flag
 
     # TradeLocker UI metadata
     params_metadata = {
