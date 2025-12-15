@@ -75,7 +75,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   3. **Choppiness Index Filter**:
      - Chop > 61.8 = choppy market, blocks trend trades
      - Uses LOG10(SUM(TrueRange)/HighestHigh-LowestLow)
-- **New Parameters**: `adx_range_threshold`, `ema_slope_lookback`, `min_ema_slope`, `chop_period`, `chop_threshold`, `use_slope_filter`, `use_chop_filter`### Added - EUR_USD Professional Trading Strategy (2025-12-10)
+- **New Parameters**: `adx_range_threshold`, `ema_slope_lookback`, `min_ema_slope`, `chop_period`, `chop_threshold`, `use_slope_filter`, `use_chop_filter`
+
+### Fixed - XAU Adaptive Strategy Squeeze Trap (2025-12-15)
+- **Bug**: Low ADX (<20) during BB squeeze led to false RANGING mode, catching falling knives during breakouts
+- **Root Cause**: Apr-Jun 2024 backtest: -15.28% ROI - bands tightened (squeeze), then violent breakout crushed mean reversion entries
+- **Fixes Implemented**:
+  1. **Bollinger Bandwidth Filter**:
+     - Calculates width = (Upper - Lower) / Middle
+     - If width < 0.15%, market is in SQUEEZE → forces DEAD_ZONE
+     - Prevents mean reversion during volatility compression
+  2. **Stochastic Crossover Confirmation**:
+     - Changed from level check (`K < 25`) to crossover check (`K > D`)
+     - LONG only when Stoch crosses UP (momentum turning bullish)
+     - SHORT only when Stoch crosses DOWN (momentum turning bearish)
+     - Avoids catching falling knives
+- **New Parameters**: `min_bb_width` (0.0015), `use_squeeze_filter` (True)### Added - EUR_USD Professional Trading Strategy (2025-12-10)
 - **Feature**: Created comprehensive EUR_USD trading bot based on institutional-grade research
 - **Strategy Components**:
   - **Dual-Filter EMA System**: 200 EMA trend filter + 20/50 EMA crossover signals

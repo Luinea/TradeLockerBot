@@ -38,6 +38,10 @@ class XauAdaptiveStrategy(bt.Strategy):
         ("chop_threshold", 61.8),  # Chop > 61.8 = choppy/ranging market
         ("use_chop_filter", True),  # Enable Choppiness Index filter
         
+        # === BOLLINGER SQUEEZE FILTER (NEW) ===
+        ("min_bb_width", 0.0015),  # 0.15% - if lower, it's a SQUEEZE (danger!)
+        ("use_squeeze_filter", True),  # Block mean reversion during squeeze
+        
         # === TREND FOLLOWING (EMA Ribbon) ===
         ("ema_fast", 8),
         ("ema_medium", 21),
@@ -208,14 +212,39 @@ class XauAdaptiveStrategy(bt.Strategy):
         except:
             return 0
 
+    def calculate_bb_width(self):
+        """
+        Calculate Bollinger Bandwidth as percentage of price.
+        Width = (UpperBand - LowerBand) / MiddleBand
+        Low width (<0.15%) = SQUEEZE (breakout imminent, dangerous for mean reversion)
+        """
+        try:
+            top = self.bb.lines.top[0]
+            bot = self.bb.lines.bot[0]
+            mid = self.bb.lines.mid[0]
+            if mid == 0:
+                return 1.0  # Avoid division by zero, assume wide
+            return (top - bot) / mid
+        except:
+            return 1.0  # Default to wide (safe)
+
     def detect_regime(self):
         """
-        Detect market regime with anti-whipsaw filters:
-        1. ADX Hysteresis: >30 = Trend, <20 = Range, 20-30 = Dead Zone
-        2. EMA Slope Filter: EMA50 must be moving, not flat
-        3. Choppiness Index: >61.8 = Choppy (no trend trades)
+        Detect market regime with anti-whipsaw and anti-squeeze filters:
+        1. BB Squeeze: Tight bands = breakout imminent, no mean reversion
+        2. ADX Hysteresis: >30 = Trend, <20 = Range, 20-30 = Dead Zone
+        3. EMA Slope Filter: EMA50 must be moving, not flat
+        4. Choppiness Index: >61.8 = Choppy (no trend trades)
         """
         adx_val = self.adx.adx[0]
+        
+        # === FILTER 0: BB SQUEEZE CHECK (NEW) ===
+        # If bands are too tight, breakout is imminent - DON'T FADE!
+        if self.params.use_squeeze_filter:
+            bb_width = self.calculate_bb_width()
+            if bb_width < self.params.min_bb_width:
+                self.log(f'SQUEEZE DETECTED: Width={bb_width:.4f} < {self.params.min_bb_width} - DEAD_ZONE')
+                return 'DEAD_ZONE'
         
         # === FILTER 1: ADX Hysteresis ===
         if adx_val >= self.params.adx_trend_threshold:  # ADX > 30
@@ -350,25 +379,27 @@ class XauAdaptiveStrategy(bt.Strategy):
                             entry_reason = f"TREND: Pullback complete, EMA8={self.ema_fast[0]:.2f}"
                             self.in_pullback_zone = False
         
-        # === RANGING REGIME: Mean Reversion ===
+        # === RANGING REGIME: Mean Reversion (with crossover confirmation) ===
         elif self.current_regime == 'RANGING':
             lower_bb, upper_bb = self.bb.lines.bot[0], self.bb.lines.top[0]
             rsi_val = self.rsi[0]
             stoch_k = self.stoch.percK[0]
+            stoch_d = self.stoch.percD[0]
             
-            # Long: Price below BB + RSI oversold + Stoch oversold
+            # LONG: Price below BB + RSI oversold + Stoch CROSSOVER UP (momentum shift)
+            # Requires K > D (crossover) not just K < 25 (level)
             if price < lower_bb and rsi_val < self.params.rsi_oversold:
-                if stoch_k < self.params.stoch_oversold:
+                if stoch_k > stoch_d:  # Stoch crossing UP = momentum turning bullish
                     if not self.params.use_ha_filter or self.ha_color == 'GREEN':
                         signal = 'LONG'
-                        entry_reason = f"RANGE: BB breach, RSI={rsi_val:.1f}"
+                        entry_reason = f"RANGE: BB breach + Stoch crossover UP, RSI={rsi_val:.1f}"
             
-            # Short: Price above BB + RSI overbought + Stoch overbought
+            # SHORT: Price above BB + RSI overbought + Stoch CROSSOVER DOWN
             elif price > upper_bb and rsi_val > self.params.rsi_overbought:
-                if stoch_k > self.params.stoch_overbought:
+                if stoch_k < stoch_d:  # Stoch crossing DOWN = momentum turning bearish
                     if not self.params.use_ha_filter or self.ha_color == 'RED':
                         signal = 'SHORT'
-                        entry_reason = f"RANGE: BB breach, RSI={rsi_val:.1f}"
+                        entry_reason = f"RANGE: BB breach + Stoch crossover DOWN, RSI={rsi_val:.1f}"
         
         # === MACRO TREND FILTER ===
         # Block counter-trend trades when trade_with_trend_only is enabled
