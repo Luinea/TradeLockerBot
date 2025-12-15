@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Choppy Market Improvements (2024-12-16)
+- **Problem**: Apr-Jun 2024 backtest showed 47 trades with -$84.35 P&L, 7 trades losing >$15 each
+- **Root Cause**: Trend Pullback entries getting whipsawed at EMA8 crossings
+- **Solutions Implemented**:
+
+#### 1. Multi-Bar Confirmation
+- New parameter `pullback_confirm_bars` (default: 2)
+- Requires price to stay above/below EMA8 for 2 bars before entry
+- Prevents false entries from single-bar fake crosses
+
+#### 2. RSI Alignment Filter
+- New parameters: `trend_rsi_long_min` (45), `trend_rsi_short_max` (55)
+- LONG entries require RSI > 45 (momentum still bullish)
+- SHORT entries require RSI < 55 (momentum still bearish)
+- Prevents counter-momentum entries
+
+#### 3. ATR Expansion Filter
+- New parameter `atr_expansion_limit` (default: 1.2)
+- Skips entry if ATR expanded > 20% from previous bar
+- True pullbacks have stable/contracting volatility, not spikes
+
+#### 4. Stronger Trend Requirement
+- New parameter `adx_strong_trend` (default: 35)
+- Trend Pullback entries now require ADX > 35 (was 30)
+- Only trades in strong, established trends
+
+#### 5. Regime-Aware Hold Time
+- New parameter `trend_hold_minutes` (default: 120 mins)
+- TRENDING trades get 2 hours to develop (was 60 mins)
+- RANGING trades still use 60 min timeout
+- Prevents cutting winning trend trades short
+
+#### 6. Trailing Stop with Breakeven
+- New parameters: `use_trailing_stop`, `breakeven_atr_mult`, `trail_atr_mult`
+- After 1x ATR profit, SL moves to breakeven (entry price)
+- Then trails 0.5x ATR behind price
+- Locks in profits and prevents winners becoming losers
+
+- **Expected Impact**: Fewer trades (30-35 vs 47), lower max drawdown (<5%), higher win rate (>50%)
+
+
 ### Added - Momentum Breakout Strategy (2025-12-15)
 - **Feature**: Replaced mean reversion with MOMENTUM BREAKOUT for RANGING regime
 - **Logic**: Instead of fading BB extremes, now trades WITH confirmed breakouts:

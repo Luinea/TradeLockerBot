@@ -84,6 +84,28 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         # === MOMENTUM BREAKOUT (RANGING REGIME) ===
         ("use_mean_reversion", False),  # DISABLED: Too many false breakouts in Apr-Jun 2024
+        
+        # === CHOPPY MARKET IMPROVEMENTS (Dec 2024) ===
+        # Multi-bar confirmation - requires price to stay above/below EMA for multiple bars
+        ("pullback_confirm_bars", 2),   # Require 2 bars of confirmation before entry
+        
+        # RSI alignment filter - ensures momentum aligns with trade direction
+        ("trend_rsi_long_min", 45),     # RSI must be > 45 for long entries (not oversold = momentum up)
+        ("trend_rsi_short_max", 55),    # RSI must be < 55 for short entries (not overbought = momentum down)
+        
+        # ATR expansion filter - don't enter when volatility is spiking (not a true pullback)
+        ("atr_expansion_limit", 1.2),   # Skip if ATR expanded > 20% from previous bar
+        
+        # Extended hold time for trend trades (trends need time to develop)
+        ("trend_hold_minutes", 120),    # 2 hours for trend trades vs 60 mins for ranging
+        
+        # Stronger trend requirement for pullback entries
+        ("adx_strong_trend", 35),       # ADX must exceed 35 for Trend Pullback entry
+        
+        # Trailing stop - move to breakeven after profit
+        ("use_trailing_stop", True),    # Enable breakeven + trailing stop
+        ("breakeven_atr_mult", 1.0),    # Move SL to breakeven after 1x ATR profit
+        ("trail_atr_mult", 0.5),        # Trail stop by 0.5x ATR after breakeven
     )
 
     def __init__(self):
@@ -140,6 +162,13 @@ class XauAdaptiveStrategy(bt.Strategy):
         self.last_trade_time = None  # Cooldown: time of last trade close
         self.entry_time = None  # Time-based exit: when current trade was opened
         self.is_mean_reversion_trade = False  # Flag to use middle BB as TP
+        
+        # === TRAILING STOP STATE (Dec 2024) ===
+        self.entry_price = None          # Price at entry for breakeven calculation
+        self.entry_atr = None            # ATR at entry for trailing stop distance
+        self.entry_regime = None         # Regime at entry (for hold time logic)
+        self.is_breakeven = False        # Has SL been moved to breakeven?
+        self.trailing_stop_price = None  # Current trailing stop level
 
     def log(self, txt, dt=None):
         if dt is None:
@@ -360,12 +389,20 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         # === TIME-BASED EXIT (SCALPING OPTIMIZATION) ===
         # Close position if held longer than max_hold_minutes without hitting TP/SL
+        # TREND trades get more time (trend_hold_minutes), RANGING trades use standard time
         if self.position and self.entry_time is not None:
             from datetime import timedelta
             current_time = self.datas[0].datetime.datetime(0)
-            hold_delta = timedelta(minutes=self.params.max_hold_minutes)
+            
+            # Use longer hold time for trend trades (they need time to develop)
+            if self.entry_regime == 'TRENDING':
+                max_hold = self.params.trend_hold_minutes
+            else:
+                max_hold = self.params.max_hold_minutes
+            
+            hold_delta = timedelta(minutes=max_hold)
             if current_time >= self.entry_time + hold_delta:
-                self.log(f"TIME EXIT: Position held > {self.params.max_hold_minutes} mins - closing at market")
+                self.log(f"TIME EXIT: Position held > {max_hold} mins ({self.entry_regime}) - closing at market")
                 # CRITICAL: Cancel pending bracket orders first to prevent orphan orders
                 for o in self.bracket_orders:
                     if o and o.alive():
@@ -373,7 +410,66 @@ class XauAdaptiveStrategy(bt.Strategy):
                 self.bracket_orders = []
                 self.close()
                 self.entry_time = None
+                self.entry_regime = None
                 return
+        
+        # === TRAILING STOP LOGIC (Dec 2024) ===
+        # Moves SL to breakeven after 1x ATR profit, then trails behind price
+        if self.position and self.params.use_trailing_stop and self.entry_price and self.entry_atr:
+            current_price = self.data.close[0]
+            breakeven_dist = self.entry_atr * self.params.breakeven_atr_mult
+            
+            # Long position trailing stop
+            if self.position.size > 0:
+                profit = current_price - self.entry_price
+                
+                # Move to breakeven after 1x ATR profit
+                if not self.is_breakeven and profit >= breakeven_dist:
+                    self.is_breakeven = True
+                    self.trailing_stop_price = self.entry_price + 0.10  # Tiny buffer above entry
+                    self.log(f"BREAKEVEN: Moved SL to {self.trailing_stop_price:.2f} (entry was {self.entry_price:.2f})")
+                
+                # Trail stop behind price after breakeven
+                if self.is_breakeven and self.trailing_stop_price:
+                    trail_dist = self.entry_atr * self.params.trail_atr_mult
+                    new_trail = current_price - trail_dist
+                    if new_trail > self.trailing_stop_price:
+                        self.trailing_stop_price = new_trail
+                        # Check if we should exit
+                        if current_price <= self.trailing_stop_price:
+                            self.log(f"TRAILING STOP: Exiting LONG at {current_price:.2f} (trail={self.trailing_stop_price:.2f})")
+                            for o in self.bracket_orders:
+                                if o and o.alive():
+                                    self.cancel(o)
+                            self.bracket_orders = []
+                            self.close()
+                            return
+            
+            # Short position trailing stop
+            elif self.position.size < 0:
+                profit = self.entry_price - current_price
+                
+                # Move to breakeven after 1x ATR profit
+                if not self.is_breakeven and profit >= breakeven_dist:
+                    self.is_breakeven = True
+                    self.trailing_stop_price = self.entry_price - 0.10  # Tiny buffer below entry
+                    self.log(f"BREAKEVEN: Moved SL to {self.trailing_stop_price:.2f} (entry was {self.entry_price:.2f})")
+                
+                # Trail stop behind price after breakeven
+                if self.is_breakeven and self.trailing_stop_price:
+                    trail_dist = self.entry_atr * self.params.trail_atr_mult
+                    new_trail = current_price + trail_dist
+                    if new_trail < self.trailing_stop_price:
+                        self.trailing_stop_price = new_trail
+                        # Check if we should exit
+                        if current_price >= self.trailing_stop_price:
+                            self.log(f"TRAILING STOP: Exiting SHORT at {current_price:.2f} (trail={self.trailing_stop_price:.2f})")
+                            for o in self.bracket_orders:
+                                if o and o.alive():
+                                    self.cancel(o)
+                            self.bracket_orders = []
+                            self.close()
+                            return
         
         if self.order or self.position:
             return
@@ -431,20 +527,54 @@ class XauAdaptiveStrategy(bt.Strategy):
                     self.in_pullback_zone = True
                     self.pullback_direction = trend
                 
+                # === CHOPPY MARKET FILTERS (Dec 2024) ===
+                # Filter 1: Stronger trend requirement (ADX > 35 for entry)
+                adx_strong_enough = adx_val >= self.params.adx_strong_trend
+                
+                # Filter 2: ATR not expanding (true pullback, not volatility spike)
+                atr_stable = True
+                if len(self.atr) > 1 and self.atr[-1] > 0:
+                    atr_stable = self.atr[0] <= self.atr[-1] * self.params.atr_expansion_limit
+                
+                # Filter 3: RSI alignment (momentum confirms direction)
+                rsi_val = self.rsi[0]
+                
                 # Long entry - price returns above EMA8 after pullback
                 if self.in_pullback_zone and self.pullback_direction == 'BULLISH':
-                    if price > self.ema_fast[0]:
+                    # Multi-bar confirmation: price above EMA8 for N bars
+                    bars_above = 0
+                    for i in range(self.params.pullback_confirm_bars):
+                        if len(self.data.close) > i and len(self.ema_fast) > i:
+                            if self.data.close[-i] > self.ema_fast[-i]:
+                                bars_above += 1
+                    confirmed = bars_above >= self.params.pullback_confirm_bars
+                    
+                    # RSI filter: must show bullish momentum (RSI > 45)
+                    rsi_aligned = rsi_val >= self.params.trend_rsi_long_min
+                    
+                    if price > self.ema_fast[0] and confirmed and adx_strong_enough and atr_stable and rsi_aligned:
                         if not self.params.use_ha_filter or self.ha_color == 'GREEN':
                             signal = 'LONG'
-                            entry_reason = f"TREND PULLBACK: Price > EMA8={self.ema_fast[0]:.2f}"
+                            entry_reason = f"TREND PULLBACK: Price > EMA8={self.ema_fast[0]:.2f} | ADX={adx_val:.1f} | RSI={rsi_val:.1f}"
                             self.in_pullback_zone = False
                 
                 # Short entry - price returns below EMA8 after pullback
                 elif self.in_pullback_zone and self.pullback_direction == 'BEARISH':
-                    if price < self.ema_fast[0]:
+                    # Multi-bar confirmation: price below EMA8 for N bars
+                    bars_below = 0
+                    for i in range(self.params.pullback_confirm_bars):
+                        if len(self.data.close) > i and len(self.ema_fast) > i:
+                            if self.data.close[-i] < self.ema_fast[-i]:
+                                bars_below += 1
+                    confirmed = bars_below >= self.params.pullback_confirm_bars
+                    
+                    # RSI filter: must show bearish momentum (RSI < 55)
+                    rsi_aligned = rsi_val <= self.params.trend_rsi_short_max
+                    
+                    if price < self.ema_fast[0] and confirmed and adx_strong_enough and atr_stable and rsi_aligned:
                         if not self.params.use_ha_filter or self.ha_color == 'RED':
                             signal = 'SHORT'
-                            entry_reason = f"TREND PULLBACK: Price < EMA8={self.ema_fast[0]:.2f}"
+                            entry_reason = f"TREND PULLBACK: Price < EMA8={self.ema_fast[0]:.2f} | ADX={adx_val:.1f} | RSI={rsi_val:.1f}"
                             self.in_pullback_zone = False
         
         # =====================================================
@@ -540,6 +670,11 @@ class XauAdaptiveStrategy(bt.Strategy):
                 self.log(f'  LONG: Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}')
                 self.bracket_orders = self.buy_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
                 self.entry_time = self.datas[0].datetime.datetime(0)  # For time-based exit
+                self.entry_price = price  # For trailing stop
+                self.entry_atr = atr_val  # For trailing stop distance
+                self.entry_regime = self.current_regime  # For regime-aware hold time
+                self.is_breakeven = False  # Reset trailing stop state
+                self.trailing_stop_price = None
                 self.daily_trades += 1
                 self.is_mean_reversion_trade = False  # Reset flag
                 
@@ -554,6 +689,11 @@ class XauAdaptiveStrategy(bt.Strategy):
                 self.log(f'  SHORT: Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}')
                 self.bracket_orders = self.sell_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
                 self.entry_time = self.datas[0].datetime.datetime(0)  # For time-based exit
+                self.entry_price = price  # For trailing stop
+                self.entry_atr = atr_val  # For trailing stop distance
+                self.entry_regime = self.current_regime  # For regime-aware hold time
+                self.is_breakeven = False  # Reset trailing stop state
+                self.trailing_stop_price = None
                 self.daily_trades += 1
                 self.is_mean_reversion_trade = False  # Reset flag
 
