@@ -4,25 +4,32 @@ import math
 
 class XauAdaptiveStrategy(bt.Strategy):
     """
-    Adaptive Multi-Strategy XAU/USD Scalper.
+    Hybrid Regime-Aware XAU/USD Strategy.
     
-    Automatically switches between strategies based on market regime:
-    - TRENDING: Uses EMA Ribbon pullback entries (Trend Following)
-    - RANGING: Uses Bollinger+RSI mean reversion entries
-    - Heikin-Ashi confirmation filter enhances both modes
+    Combines TWO approaches based on market regime:
     
-    Regime Detection:
-    - ADX > threshold = TRENDING
-    - ADX < threshold = RANGING
-    - Bollinger Band Width for volatility confirmation
+    1. TRENDING REGIME (ADX > 25 + aligned EMAs):
+       - Uses EMA Ribbon pullback entries
+       - Ignores Asian range completely
+       - Best for strong directional moves (Jul-Sep 2025 type)
     
-    Based on Strat.md combined strategies approach.
+    2. RANGING REGIME (ADX < 25 or EMAs not aligned):
+       - Uses Asian Range Breakout logic
+       - Waits for clean break of Asian session box
+       - Best for choppy sideways markets
+    
+    This solves the problem where:
+    - Asian breakout failed in trending markets (-40%)
+    - Simple EMA pullback missed opportunities in choppy markets
+    
+    The strategy automatically detects which regime we're in and applies
+    the appropriate entry logic.
     """
     
     params = (
         # === REGIME DETECTION ===
         ("adx_period", 14),
-        ("adx_trend_threshold", 25),  # ADX > 25 = trending market
+        ("adx_trend_threshold", 25),  # ADX > 25 = strong trending
         ("bb_period", 20),
         ("bb_dev", 2.0),
         
@@ -31,7 +38,7 @@ class XauAdaptiveStrategy(bt.Strategy):
         ("ema_medium", 21),
         ("ema_slow", 50),
         
-        # === MEAN REVERSION (BB+RSI+Stoch) ===
+        # === MEAN REVERSION (BB+RSI+Stoch) - for ranging ===
         ("rsi_period", 14),
         ("rsi_oversold", 30),
         ("rsi_overbought", 70),
@@ -41,6 +48,13 @@ class XauAdaptiveStrategy(bt.Strategy):
         ("stoch_oversold", 25),
         ("stoch_overbought", 75),
         
+        # === ASIAN RANGE BREAKOUT (for ranging regime) ===
+        ("asian_start_hour", 1),   # 01:00 GMT - Range starts
+        ("asian_end_hour", 8),     # 08:00 GMT - Range ends
+        ("trade_start_hour", 8),   # 08:00 GMT - Trading begins
+        ("trade_end_hour", 17),    # 17:00 GMT - No new entries
+        ("breakout_buffer", 0.5),  # Pips buffer for breakout
+        
         # === HEIKIN-ASHI FILTER ===
         ("use_ha_filter", True),  # Require HA color alignment
         
@@ -48,11 +62,6 @@ class XauAdaptiveStrategy(bt.Strategy):
         ("atr_period", 14),
         ("atr_sl_multiplier", 1.5),
         ("tp_risk_reward", 2.0),
-        
-        # === TIME FILTER ===
-        ("trade_start_hour", 13),
-        ("trade_end_hour", 17),
-        ("use_time_filter", True),
         
         # === RISK MANAGEMENT ===
         ("risk_per_trade_percent", 0.01),
@@ -99,16 +108,22 @@ class XauAdaptiveStrategy(bt.Strategy):
         self.prev_ha_close = None
         self.ha_color = None  # 'GREEN' or 'RED'
         
-        # === PULLBACK TRACKING ===
+        # === PULLBACK TRACKING (for trending regime) ===
         self.in_pullback_zone = False
         self.pullback_direction = None
+        
+        # === ASIAN RANGE TRACKING (for ranging regime) ===
+        self.asian_range_high = None
+        self.asian_range_low = None
+        self.asian_range_formed = False
+        self.traded_breakout_today = False  # Only one breakout per day
         
         # === STATE ===
         self.order = None
         self.daily_trades = 0
         self.daily_pnl = 0.0
         self.last_trade_date = None
-        self.daily_peak_equity = 0.0  # Resets each trading day
+        self.daily_peak_equity = 0.0
         self.current_regime = None
 
     def log(self, txt, dt=None):
@@ -123,7 +138,7 @@ class XauAdaptiveStrategy(bt.Strategy):
         print(f'{dts}, {txt}')
 
     def start(self):
-        self.log("XAU Adaptive Strategy Started")
+        self.log("XAU Hybrid Adaptive Strategy Started")
         self.daily_peak_equity = self.broker.getvalue()
 
     def notify_order(self, order):
@@ -165,10 +180,16 @@ class XauAdaptiveStrategy(bt.Strategy):
         self.prev_ha_close = self.ha_close
 
     def detect_regime(self):
-        """Detect market regime based on ADX."""
-        adx_val = self.adx.adx[0]
+        """
+        Detect market regime based on ADX AND EMA alignment.
         
-        if adx_val > self.params.adx_trend_threshold:
+        TRENDING: ADX > 25 AND EMAs properly stacked
+        RANGING: ADX < 25 OR EMAs not aligned
+        """
+        adx_val = self.adx.adx[0]
+        ema_aligned = self.check_ema_stack() is not None
+        
+        if adx_val > self.params.adx_trend_threshold and ema_aligned:
             return 'TRENDING'
         else:
             return 'RANGING'
@@ -193,14 +214,22 @@ class XauAdaptiveStrategy(bt.Strategy):
             return price_high >= fast and price_high <= medium
         return False
 
-    def is_trading_hours(self):
-        if not self.params.use_time_filter:
-            return True
+    def get_current_hour(self):
+        """Get current hour from data."""
         try:
-            hour = self.datas[0].datetime.datetime(0).hour
-            return self.params.trade_start_hour <= hour < self.params.trade_end_hour
+            return self.datas[0].datetime.datetime(0).hour
         except:
-            return False
+            return 0
+
+    def is_trading_hours(self):
+        """Check if we're in trading hours (08:00-17:00 GMT)."""
+        hour = self.get_current_hour()
+        return self.params.trade_start_hour <= hour < self.params.trade_end_hour
+
+    def is_asian_session(self):
+        """Check if we're in Asian session for range tracking."""
+        hour = self.get_current_hour()
+        return self.params.asian_start_hour <= hour < self.params.asian_end_hour
 
     def calculate_position_size(self, sl_distance):
         """Calculate position size based on risk."""
@@ -214,23 +243,45 @@ class XauAdaptiveStrategy(bt.Strategy):
         # Calculate Heikin-Ashi
         self.calculate_heikin_ashi()
         
-        # === RISK MANAGEMENT ===
+        # === DAILY RESET ===
+        current_date = self.datas[0].datetime.date(0)
         current_equity = self.broker.getvalue()
         
-        # Daily reset - MUST happen before drawdown check
-        current_date = self.datas[0].datetime.date(0)
         if self.last_trade_date != current_date:
             self.daily_trades = 0
             self.daily_pnl = 0.0
             self.last_trade_date = current_date
-            # Reset daily peak equity to allow recovery each day
             self.daily_peak_equity = current_equity
+            # Reset Asian range for new day
+            self.asian_range_high = None
+            self.asian_range_low = None
+            self.asian_range_formed = False
+            self.traded_breakout_today = False
+            self.in_pullback_zone = False
+            self.pullback_direction = None
         
-        # Track daily peak (only increase, never decrease within the day)
+        # === ASIAN RANGE TRACKING (01:00-08:00 GMT) ===
+        # Always track the Asian range, even if we're in trending mode
+        # This gives us a fallback for when regime changes
+        if self.is_asian_session():
+            if self.asian_range_high is None:
+                self.asian_range_high = self.data.high[0]
+                self.asian_range_low = self.data.low[0]
+            else:
+                self.asian_range_high = max(self.asian_range_high, self.data.high[0])
+                self.asian_range_low = min(self.asian_range_low, self.data.low[0])
+            return  # No trading during Asian session
+        
+        # Mark Asian range as formed when session ends
+        if not self.asian_range_formed and self.asian_range_high is not None:
+            self.asian_range_formed = True
+            range_size = self.asian_range_high - self.asian_range_low
+            self.log(f"ASIAN RANGE: High={self.asian_range_high:.2f}, Low={self.asian_range_low:.2f}, Size={range_size:.2f}")
+        
+        # === RISK MANAGEMENT ===
         if current_equity > self.daily_peak_equity:
             self.daily_peak_equity = current_equity
         
-        # Check daily drawdown
         drawdown_pct = (self.daily_peak_equity - current_equity) / self.daily_peak_equity
         if drawdown_pct > self.params.max_drawdown_percent:
             self.log(f"!!! DAILY DRAWDOWN {drawdown_pct*100:.2f}% - Halting for today !!!")
@@ -256,7 +307,10 @@ class XauAdaptiveStrategy(bt.Strategy):
         signal = None
         entry_reason = ""
         
-        # === TRENDING REGIME: EMA Ribbon Pullback ===
+        # =====================================================
+        # TRENDING REGIME: Use EMA Ribbon Pullback Strategy
+        # This is the "simple version" that works in trends
+        # =====================================================
         if self.current_regime == 'TRENDING':
             trend = self.check_ema_stack()
             if trend:
@@ -264,53 +318,56 @@ class XauAdaptiveStrategy(bt.Strategy):
                     self.in_pullback_zone = True
                     self.pullback_direction = trend
                 
-                # Long entry
+                # Long entry - price returns above EMA8 after pullback
                 if self.in_pullback_zone and self.pullback_direction == 'BULLISH':
                     if price > self.ema_fast[0]:
-                        # HA filter
                         if not self.params.use_ha_filter or self.ha_color == 'GREEN':
                             signal = 'LONG'
-                            entry_reason = f"TREND: Pullback complete, EMA8={self.ema_fast[0]:.2f}"
+                            entry_reason = f"TREND PULLBACK: Price > EMA8={self.ema_fast[0]:.2f}"
                             self.in_pullback_zone = False
                 
-                # Short entry
+                # Short entry - price returns below EMA8 after pullback
                 elif self.in_pullback_zone and self.pullback_direction == 'BEARISH':
                     if price < self.ema_fast[0]:
                         if not self.params.use_ha_filter or self.ha_color == 'RED':
                             signal = 'SHORT'
-                            entry_reason = f"TREND: Pullback complete, EMA8={self.ema_fast[0]:.2f}"
+                            entry_reason = f"TREND PULLBACK: Price < EMA8={self.ema_fast[0]:.2f}"
                             self.in_pullback_zone = False
         
-        # === RANGING REGIME: Mean Reversion ===
-        elif self.current_regime == 'RANGING':
-            lower_bb, upper_bb = self.bb.lines.bot[0], self.bb.lines.top[0]
-            rsi_val = self.rsi[0]
-            stoch_k = self.stoch.percK[0]
+        # =====================================================
+        # RANGING REGIME: Use Asian Range Breakout Strategy
+        # This is the "choppy market" solution
+        # =====================================================
+        elif self.current_regime == 'RANGING' and self.asian_range_formed and not self.traded_breakout_today:
+            buffer = self.params.breakout_buffer
             
-            # Long: Price below BB + RSI oversold + Stoch oversold
-            if price < lower_bb and rsi_val < self.params.rsi_oversold:
-                if stoch_k < self.params.stoch_oversold:
-                    if not self.params.use_ha_filter or self.ha_color == 'GREEN':
+            # Long breakout - price breaks above Asian high
+            if price > (self.asian_range_high + buffer):
+                if not self.params.use_ha_filter or self.ha_color == 'GREEN':
+                    # Check macro trend alignment
+                    if not self.params.trade_with_trend_only or price > self.ema_macro[0]:
                         signal = 'LONG'
-                        entry_reason = f"RANGE: BB breach, RSI={rsi_val:.1f}"
+                        entry_reason = f"ASIAN BREAKOUT UP: Price={price:.2f} > Range High={self.asian_range_high:.2f}"
+                        self.traded_breakout_today = True
             
-            # Short: Price above BB + RSI overbought + Stoch overbought
-            elif price > upper_bb and rsi_val > self.params.rsi_overbought:
-                if stoch_k > self.params.stoch_overbought:
-                    if not self.params.use_ha_filter or self.ha_color == 'RED':
+            # Short breakout - price breaks below Asian low
+            elif price < (self.asian_range_low - buffer):
+                if not self.params.use_ha_filter or self.ha_color == 'RED':
+                    # Check macro trend alignment
+                    if not self.params.trade_with_trend_only or price < self.ema_macro[0]:
                         signal = 'SHORT'
-                        entry_reason = f"RANGE: BB breach, RSI={rsi_val:.1f}"
+                        entry_reason = f"ASIAN BREAKOUT DOWN: Price={price:.2f} < Range Low={self.asian_range_low:.2f}"
+                        self.traded_breakout_today = True
         
-        # === MACRO TREND FILTER ===
-        # Block counter-trend trades when trade_with_trend_only is enabled
-        if signal and self.params.trade_with_trend_only:
+        # === MACRO TREND FILTER (for trending regime) ===
+        if signal and self.current_regime == 'TRENDING' and self.params.trade_with_trend_only:
             macro_trend_bullish = price > self.ema_macro[0]
             
             if signal == 'LONG' and not macro_trend_bullish:
-                self.log(f'BLOCKED: LONG signal but price {price:.2f} < EMA200 {self.ema_macro[0]:.2f}')
+                self.log(f'BLOCKED: LONG but price {price:.2f} < EMA200 {self.ema_macro[0]:.2f}')
                 signal = None
             elif signal == 'SHORT' and macro_trend_bullish:
-                self.log(f'BLOCKED: SHORT signal but price {price:.2f} > EMA200 {self.ema_macro[0]:.2f}')
+                self.log(f'BLOCKED: SHORT but price {price:.2f} > EMA200 {self.ema_macro[0]:.2f}')
                 signal = None
         
         # === EXECUTE SIGNAL ===
@@ -324,7 +381,7 @@ class XauAdaptiveStrategy(bt.Strategy):
             if signal == 'LONG':
                 sl_price = price - sl_distance
                 tp_price = price + (sl_distance * self.params.tp_risk_reward)
-                self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f}')
+                self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f} | Regime={self.current_regime}')
                 self.log(f'  LONG: Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}')
                 self.buy_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
                 self.daily_trades += 1
@@ -332,7 +389,7 @@ class XauAdaptiveStrategy(bt.Strategy):
             elif signal == 'SHORT':
                 sl_price = price + sl_distance
                 tp_price = price - (sl_distance * self.params.tp_risk_reward)
-                self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f}')
+                self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f} | Regime={self.current_regime}')
                 self.log(f'  SHORT: Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}')
                 self.sell_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
                 self.daily_trades += 1
@@ -341,7 +398,7 @@ class XauAdaptiveStrategy(bt.Strategy):
     params_metadata = {
         "adx_trend_threshold": {
             "label": "ADX Trend Threshold",
-            "helper_text": "ADX value above this = TRENDING, below = RANGING (default: 25)",
+            "helper_text": "ADX above this + aligned EMAs = TRENDING, else RANGING (default: 25)",
             "value_type": "int",
         },
         "use_ha_filter": {
@@ -354,14 +411,14 @@ class XauAdaptiveStrategy(bt.Strategy):
             "helper_text": "Percentage of equity to risk (default: 0.01 = 1%)",
             "value_type": "float",
         },
-        "use_time_filter": {
-            "label": "Use Time Filter",
-            "helper_text": "Only trade during London/NY Overlap (13:00-17:00 GMT)",
-            "value_type": "bool",
-        },
         "trade_with_trend_only": {
             "label": "Trade With Trend Only",
-            "helper_text": "Block counter-trend trades using EMA200 (LONG above, SHORT below)",
+            "helper_text": "Block counter-trend trades using EMA200",
             "value_type": "bool",
+        },
+        "breakout_buffer": {
+            "label": "Breakout Buffer (pips)",
+            "helper_text": "Minimum distance above/below Asian range for valid breakout",
+            "value_type": "float",
         },
     }
