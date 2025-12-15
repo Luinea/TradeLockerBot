@@ -34,6 +34,7 @@ class XauAdaptiveStrategy(bt.Strategy):
         # Dead Zone: ADX 20-30 = No new trades (prevents whipsaw)
         ("adx_min_threshold", 12), # Don't trade AT ALL if ADX < 12 (market is dead)
         ("atr_min_pips", 3.0),     # Don't trade if ATR < 3 pips (range too tight for scalping)
+        ("require_rising_adx", True), # NEW: Only enter when ADX is rising (momentum building)
         ("bb_period", 20),
         ("bb_dev", 2.0),
         
@@ -64,8 +65,8 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         # === ATR & RISK ===
         ("atr_period", 14),
-        ("atr_sl_multiplier", 1.5),
-        ("tp_risk_reward", 2.0),
+        ("atr_sl_multiplier", 2.0),  # WIDENED from 1.5 to give trades more room
+        ("tp_risk_reward", 1.5),    # REDUCED from 2.0 for more realistic TP hits
         
         # === RISK MANAGEMENT ===
         ("risk_per_trade_percent", 0.01),
@@ -375,6 +376,13 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         signal = None
         entry_reason = ""
+        
+        # === ADX RISING CHECK ===
+        # Only enter when momentum is building (ADX rising), not fading
+        if self.params.require_rising_adx:
+            if len(self.adx.adx) > 1 and adx_val < self.adx.adx[-1]:
+                # ADX is falling - momentum is fading, skip entry
+                return
         
         # =====================================================
         # TRENDING REGIME: Use EMA Ribbon Pullback Strategy
