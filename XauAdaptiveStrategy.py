@@ -468,6 +468,7 @@ class XauAdaptiveStrategy(bt.Strategy):
                             self.traded_breakout_today = True
             
             # Mean Reversion: BB + RSI (if no breakout signal)
+            # NOTE: No HA filter here - mean reversion is counter-trend by nature
             if signal is None and self.params.use_mean_reversion:
                 lower_bb = self.bb.lines.bot[0]
                 upper_bb = self.bb.lines.top[0]
@@ -475,17 +476,15 @@ class XauAdaptiveStrategy(bt.Strategy):
                 
                 # LONG: Price below Lower BB + RSI oversold
                 if price < lower_bb and rsi_val < self.params.rsi_oversold:
-                    if not self.params.use_ha_filter or self.ha_color == 'GREEN':
-                        signal = 'LONG'
-                        entry_reason = f"MEAN REVERSION: Price={price:.2f} < LowerBB={lower_bb:.2f}, RSI={rsi_val:.1f}"
-                        self.is_mean_reversion_trade = True
+                    signal = 'LONG'
+                    entry_reason = f"MEAN REVERSION: Price={price:.2f} < LowerBB={lower_bb:.2f}, RSI={rsi_val:.1f}"
+                    self.is_mean_reversion_trade = True
                 
                 # SHORT: Price above Upper BB + RSI overbought
                 elif price > upper_bb and rsi_val > self.params.rsi_overbought:
-                    if not self.params.use_ha_filter or self.ha_color == 'RED':
-                        signal = 'SHORT'
-                        entry_reason = f"MEAN REVERSION: Price={price:.2f} > UpperBB={upper_bb:.2f}, RSI={rsi_val:.1f}"  
-                        self.is_mean_reversion_trade = True
+                    signal = 'SHORT'
+                    entry_reason = f"MEAN REVERSION: Price={price:.2f} > UpperBB={upper_bb:.2f}, RSI={rsi_val:.1f}"  
+                    self.is_mean_reversion_trade = True
         
         # === MACRO TREND FILTER (for trending regime) ===
         if signal and self.current_regime == 'TRENDING' and self.params.trade_with_trend_only:
