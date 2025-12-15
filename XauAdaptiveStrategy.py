@@ -127,6 +127,7 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         # === STATE ===
         self.order = None
+        self.bracket_orders = []  # Store bracket orders so we can cancel them on time exit
         self.daily_trades = 0
         self.daily_pnl = 0.0
         self.last_trade_date = None
@@ -179,6 +180,7 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         # Reset entry time (trade is now closed)
         self.entry_time = None
+        self.bracket_orders = []  # Clear bracket orders - trade completed normally
 
     def calculate_heikin_ashi(self):
         """Calculate Heikin-Ashi candle and determine color."""
@@ -353,6 +355,11 @@ class XauAdaptiveStrategy(bt.Strategy):
             hold_delta = timedelta(minutes=self.params.max_hold_minutes)
             if current_time >= self.entry_time + hold_delta:
                 self.log(f"TIME EXIT: Position held > {self.params.max_hold_minutes} mins - closing at market")
+                # CRITICAL: Cancel pending bracket orders first to prevent orphan orders
+                for o in self.bracket_orders:
+                    if o and o.alive():
+                        self.cancel(o)
+                self.bracket_orders = []
                 self.close()
                 self.entry_time = None
                 return
@@ -478,7 +485,7 @@ class XauAdaptiveStrategy(bt.Strategy):
                 tp_price = price + (sl_distance * self.params.tp_risk_reward)
                 self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f} | Regime={self.current_regime}')
                 self.log(f'  LONG: Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}')
-                self.buy_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
+                self.bracket_orders = self.buy_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
                 self.entry_time = self.datas[0].datetime.datetime(0)  # For time-based exit
                 self.daily_trades += 1
                 
@@ -487,7 +494,7 @@ class XauAdaptiveStrategy(bt.Strategy):
                 tp_price = price - (sl_distance * self.params.tp_risk_reward)
                 self.log(f'{entry_reason} | ADX={self.adx.adx[0]:.1f} | Regime={self.current_regime}')
                 self.log(f'  SHORT: Entry={price:.2f}, SL={sl_price:.2f}, TP={tp_price:.2f}, Size={size}')
-                self.sell_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
+                self.bracket_orders = self.sell_bracket(size=size, exectype=bt.Order.Market, stopprice=sl_price, limitprice=tp_price)
                 self.entry_time = self.datas[0].datetime.datetime(0)  # For time-based exit
                 self.daily_trades += 1
 
