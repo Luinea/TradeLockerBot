@@ -39,8 +39,9 @@ class XauAdaptiveStrategy(bt.Strategy):
         ("use_chop_filter", True),  # Enable Choppiness Index filter
         
         # === BOLLINGER SQUEEZE FILTER (NEW) ===
-        ("min_bb_width", 0.0015),  # 0.15% - if lower, it's a SQUEEZE (danger!)
+        ("min_bb_width", 0.002),  # 0.2% - if lower, it's a SQUEEZE (danger!)
         ("use_squeeze_filter", True),  # Block mean reversion during squeeze
+        ("bb_slope_threshold", 1.5),  # If SMA20 moves >$1.50 in 3 bars, bands are trending
         
         # === TREND FOLLOWING (EMA Ribbon) ===
         ("ema_fast", 8),
@@ -49,8 +50,8 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         # === MEAN REVERSION (BB+RSI+Stoch) ===
         ("rsi_period", 14),
-        ("rsi_oversold", 30),
-        ("rsi_overbought", 70),
+        ("rsi_oversold", 35),  # Relaxed for Gold (30 often missed)
+        ("rsi_overbought", 65),  # Relaxed for Gold (70 often missed)
         ("stoch_k", 5),
         ("stoch_d", 3),
         ("stoch_slow", 3),
@@ -379,27 +380,48 @@ class XauAdaptiveStrategy(bt.Strategy):
                             entry_reason = f"TREND: Pullback complete, EMA8={self.ema_fast[0]:.2f}"
                             self.in_pullback_zone = False
         
-        # === RANGING REGIME: Mean Reversion (with crossover confirmation) ===
+        # === RANGING REGIME: Mean Reversion with Wick Rejection ===
+        # FIX: Don't buy when price closes OUTSIDE BB (that's a breakout/walk)
+        # Instead: Buy when price DIPS below but CLOSES back inside (rejection)
         elif self.current_regime == 'RANGING':
-            lower_bb, upper_bb = self.bb.lines.bot[0], self.bb.lines.top[0]
+            lower_bb = self.bb.lines.bot[0]
+            upper_bb = self.bb.lines.top[0]
+            mid_bb = self.bb.lines.mid[0]
+            
             rsi_val = self.rsi[0]
             stoch_k = self.stoch.percK[0]
             stoch_d = self.stoch.percD[0]
             
-            # LONG: Price below BB + RSI oversold + Stoch CROSSOVER UP (momentum shift)
-            # Requires K > D (crossover) not just K < 25 (level)
-            if price < lower_bb and rsi_val < self.params.rsi_oversold:
-                if stoch_k > stoch_d:  # Stoch crossing UP = momentum turning bullish
-                    if not self.params.use_ha_filter or self.ha_color == 'GREEN':
-                        signal = 'LONG'
-                        entry_reason = f"RANGE: BB breach + Stoch crossover UP, RSI={rsi_val:.1f}"
+            # === BB SLOPE CHECK ===
+            # If middle band (SMA20) is trending sharply, this isn't a range
+            try:
+                bb_slope = abs(mid_bb - self.bb.lines.mid[-3])
+            except:
+                bb_slope = 0
+            is_flat_bands = bb_slope < self.params.bb_slope_threshold
             
-            # SHORT: Price above BB + RSI overbought + Stoch CROSSOVER DOWN
-            elif price > upper_bb and rsi_val > self.params.rsi_overbought:
-                if stoch_k < stoch_d:  # Stoch crossing DOWN = momentum turning bearish
-                    if not self.params.use_ha_filter or self.ha_color == 'RED':
-                        signal = 'SHORT'
-                        entry_reason = f"RANGE: BB breach + Stoch crossover DOWN, RSI={rsi_val:.1f}"
+            if is_flat_bands:
+                # === LONG: WICK REJECTION PATTERN ===
+                # 1. Candle's LOW dipped below Lower BB (tested the level)
+                # 2. Candle's CLOSE is back above Lower BB (buyers rejected the move)
+                # 3. RSI < 35 + Stoch crossing UP
+                if self.data.low[0] < lower_bb and self.data.close[0] > lower_bb:
+                    if rsi_val < self.params.rsi_oversold and stoch_k > stoch_d:
+                        if not self.params.use_ha_filter or self.ha_color == 'GREEN':
+                            signal = 'LONG'
+                            entry_reason = f"RANGE: Wick Rejection (Low<BB, Close>BB), RSI={rsi_val:.1f}"
+                
+                # === SHORT: WICK REJECTION PATTERN ===
+                # 1. Candle's HIGH poked above Upper BB
+                # 2. Candle's CLOSE is back below Upper BB (sellers rejected the move)
+                elif self.data.high[0] > upper_bb and self.data.close[0] < upper_bb:
+                    if rsi_val > self.params.rsi_overbought and stoch_k < stoch_d:
+                        if not self.params.use_ha_filter or self.ha_color == 'RED':
+                            signal = 'SHORT'
+                            entry_reason = f"RANGE: Wick Rejection (High>BB, Close<BB), RSI={rsi_val:.1f}"
+            else:
+                # Bands are trending - skip mean reversion
+                pass
         
         # === MACRO TREND FILTER ===
         # Block counter-trend trades when trade_with_trend_only is enabled

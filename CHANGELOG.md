@@ -90,7 +90,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      - LONG only when Stoch crosses UP (momentum turning bullish)
      - SHORT only when Stoch crosses DOWN (momentum turning bearish)
      - Avoids catching falling knives
-- **New Parameters**: `min_bb_width` (0.0015), `use_squeeze_filter` (True)### Added - EUR_USD Professional Trading Strategy (2025-12-10)
+- **New Parameters**: `min_bb_width` (0.0015), `use_squeeze_filter` (True)
+
+### Fixed - XAU Adaptive Strategy Bollinger Band Walk (2025-12-15)
+- **Bug**: Bot buying when price closes OUTSIDE BB, then "walking" down the band for 3-4 candles = instant stop-out
+- **Root Cause**: `price < lower_bb` triggers during a crash, not a reversal
+- **Fixes Implemented**:
+  1. **Wick Rejection Rule**:
+     - OLD: `price < lower_bb` (triggers during crash)
+     - NEW: `low < lower_bb AND close > lower_bb` (wick dipped below but closed inside)
+     - This proves buyers stepped in at that level
+  2. **BB Slope Filter**:
+     - Measures SMA20 movement over 3 bars
+     - If slope > $1.50, bands are trending, NOT ranging
+     - Disables mean reversion during "fake ranges"
+  3. **Relaxed RSI Levels for Gold**:
+     - Oversold: 30 → 35 (catches more opportunities)
+     - Overbought: 70 → 65
+- **New Parameters**: `bb_slope_threshold` (1.5), updated `min_bb_width` (0.002)### Added - EUR_USD Professional Trading Strategy (2025-12-10)
 - **Feature**: Created comprehensive EUR_USD trading bot based on institutional-grade research
 - **Strategy Components**:
   - **Dual-Filter EMA System**: 200 EMA trend filter + 20/50 EMA crossover signals
