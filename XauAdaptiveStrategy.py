@@ -82,8 +82,8 @@ class XauAdaptiveStrategy(bt.Strategy):
         ("ema_macro", 200),  # EMA 200 for macro trend
         ("trade_with_trend_only", True),  # Only long above EMA200, short below
         
-        # === MEAN REVERSION (RANGING REGIME) ===
-        ("use_mean_reversion", True),  # Enable BB+RSI entries in ranging markets
+        # === MOMENTUM BREAKOUT (RANGING REGIME) ===
+        ("use_mean_reversion", False),  # DISABLED: Too many false breakouts in Apr-Jun 2024
     )
 
     def __init__(self):
