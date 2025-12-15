@@ -27,9 +27,11 @@ class XauAdaptiveStrategy(bt.Strategy):
     """
     
     params = (
-        # === REGIME DETECTION ===
+        # === REGIME DETECTION WITH HYSTERESIS ===
         ("adx_period", 14),
-        ("adx_trend_threshold", 25),  # ADX > 25 = strong trending
+        ("adx_trend_enter", 30),   # ADX must exceed 30 to ENTER trending mode
+        ("adx_trend_exit", 20),    # ADX must fall below 20 to EXIT trending mode
+        # Dead Zone: ADX 20-30 = No new trades (prevents whipsaw)
         ("bb_period", 20),
         ("bb_dev", 2.0),
         
@@ -125,6 +127,7 @@ class XauAdaptiveStrategy(bt.Strategy):
         self.last_trade_date = None
         self.daily_peak_equity = 0.0
         self.current_regime = None
+        self.locked_regime = None  # Hysteresis: remembers last confirmed regime
 
     def log(self, txt, dt=None):
         if dt is None:
@@ -181,18 +184,52 @@ class XauAdaptiveStrategy(bt.Strategy):
 
     def detect_regime(self):
         """
-        Detect market regime based on ADX AND EMA alignment.
+        Detect market regime with HYSTERESIS to prevent whipsaw.
         
-        TRENDING: ADX > 25 AND EMAs properly stacked
-        RANGING: ADX < 25 OR EMAs not aligned
+        - ADX > 30 AND EMAs aligned = Enter TRENDING mode
+        - ADX < 20 = Exit TRENDING, enter RANGING mode
+        - ADX 20-30 = DEAD ZONE (keep previous regime, take no new trades)
+        
+        Hysteresis prevents constant switching when ADX oscillates around threshold.
         """
         adx_val = self.adx.adx[0]
         ema_aligned = self.check_ema_stack() is not None
         
-        if adx_val > self.params.adx_trend_threshold and ema_aligned:
-            return 'TRENDING'
+        # === HYSTERESIS LOGIC ===
+        # If we're in TRENDING and ADX drops below exit threshold, switch to RANGING
+        if self.locked_regime == 'TRENDING':
+            if adx_val < self.params.adx_trend_exit:
+                self.locked_regime = 'RANGING'
+                self.log(f"REGIME CHANGE: TRENDING -> RANGING (ADX={adx_val:.1f} < {self.params.adx_trend_exit})")
+            elif not ema_aligned:
+                # EMAs no longer aligned, enter dead zone
+                return 'DEAD_ZONE'
+            else:
+                return 'TRENDING'
+        
+        # If we're in RANGING and ADX rises above enter threshold with EMAs aligned
+        elif self.locked_regime == 'RANGING':
+            if adx_val > self.params.adx_trend_enter and ema_aligned:
+                self.locked_regime = 'TRENDING'
+                self.log(f"REGIME CHANGE: RANGING -> TRENDING (ADX={adx_val:.1f} > {self.params.adx_trend_enter})")
+                return 'TRENDING'
+            else:
+                return 'RANGING'
+        
+        # First time - initialize regime
         else:
-            return 'RANGING'
+            if adx_val > self.params.adx_trend_enter and ema_aligned:
+                self.locked_regime = 'TRENDING'
+                return 'TRENDING'
+            elif adx_val < self.params.adx_trend_exit:
+                self.locked_regime = 'RANGING'
+                return 'RANGING'
+            else:
+                # In the dead zone on startup - default to RANGING (safer)
+                self.locked_regime = 'RANGING'
+                return 'DEAD_ZONE'
+        
+        return self.locked_regime
 
     def check_ema_stack(self):
         """Check EMA alignment for trend direction."""
@@ -300,6 +337,11 @@ class XauAdaptiveStrategy(bt.Strategy):
 
         # === DETECT REGIME ===
         self.current_regime = self.detect_regime()
+        
+        # === DEAD ZONE: No trades when regime is uncertain ===
+        if self.current_regime == 'DEAD_ZONE':
+            # Don't trade during regime transitions - wait for clarity
+            return
         
         price = self.data.close[0]
         atr_val = self.atr[0]
