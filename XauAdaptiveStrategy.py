@@ -377,9 +377,9 @@ class XauAdaptiveStrategy(bt.Strategy):
         signal = None
         entry_reason = ""
         
-        # === ADX RISING CHECK ===
-        # Only enter when momentum is building (ADX rising), not fading
-        if self.params.require_rising_adx:
+        # === ADX RISING CHECK (RANGING ONLY) ===
+        # Only needed in ranging - in trending, momentum is already confirmed
+        if self.params.require_rising_adx and self.current_regime == 'RANGING':
             if len(self.adx.adx) > 1 and adx_val < self.adx.adx[-1]:
                 # ADX is falling - momentum is fading, skip entry
                 return
