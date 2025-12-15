@@ -61,6 +61,10 @@ class XauAdaptiveStrategy(bt.Strategy):
         ("max_drawdown_percent", 0.06),
         ("max_lots", 0.5),
         ("contract_size", 100),
+        
+        # === TREND DIRECTION FILTER ===
+        ("ema_macro", 200),  # EMA 200 for macro trend
+        ("trade_with_trend_only", True),  # Only long above EMA200, short below
     )
 
     def __init__(self):
@@ -84,6 +88,9 @@ class XauAdaptiveStrategy(bt.Strategy):
         
         # === ATR ===
         self.atr = bt.indicators.ATR(self.data, period=self.params.atr_period)
+        
+        # === MACRO TREND FILTER ===
+        self.ema_macro = bt.indicators.EMA(self.data.close, period=self.params.ema_macro)
         
         # === HEIKIN-ASHI STATE ===
         self.ha_open = None
@@ -294,6 +301,18 @@ class XauAdaptiveStrategy(bt.Strategy):
                         signal = 'SHORT'
                         entry_reason = f"RANGE: BB breach, RSI={rsi_val:.1f}"
         
+        # === MACRO TREND FILTER ===
+        # Block counter-trend trades when trade_with_trend_only is enabled
+        if signal and self.params.trade_with_trend_only:
+            macro_trend_bullish = price > self.ema_macro[0]
+            
+            if signal == 'LONG' and not macro_trend_bullish:
+                self.log(f'BLOCKED: LONG signal but price {price:.2f} < EMA200 {self.ema_macro[0]:.2f}')
+                signal = None
+            elif signal == 'SHORT' and macro_trend_bullish:
+                self.log(f'BLOCKED: SHORT signal but price {price:.2f} > EMA200 {self.ema_macro[0]:.2f}')
+                signal = None
+        
         # === EXECUTE SIGNAL ===
         if signal:
             sl_distance = atr_val * self.params.atr_sl_multiplier
@@ -338,6 +357,11 @@ class XauAdaptiveStrategy(bt.Strategy):
         "use_time_filter": {
             "label": "Use Time Filter",
             "helper_text": "Only trade during London/NY Overlap (13:00-17:00 GMT)",
+            "value_type": "bool",
+        },
+        "trade_with_trend_only": {
+            "label": "Trade With Trend Only",
+            "helper_text": "Block counter-trend trades using EMA200 (LONG above, SHORT below)",
             "value_type": "bool",
         },
     }

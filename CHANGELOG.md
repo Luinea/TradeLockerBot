@@ -45,7 +45,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fix**: Changed to `daily_peak_equity` that resets at the start of each trading day
   - Moved daily reset logic BEFORE drawdown check to ensure fresh start each day
   - Now halts for the current day only, resumes trading with a fresh peak on the next day
-- **Expected Impact**: Strategy can now recover from drawdown and continue trading the following day### Added - EUR_USD Professional Trading Strategy (2025-12-10)
+- **Expected Impact**: Strategy can now recover from drawdown and continue trading the following day
+
+### Fixed - XAU Adaptive Strategy Counter-Trend Trading (2025-12-15)
+- **Bug**: Strategy was taking SHORT trades during strong uptrends (e.g., March 2025 rally)
+- **Root Cause**: No macro trend filter - allowed shorts when price was clearly above all EMAs
+- **Fix**: Added EMA 200 macro trend filter with `trade_with_trend_only` parameter (default: True)
+  - Price > EMA200: Only LONG signals allowed
+  - Price < EMA200: Only SHORT signals allowed
+  - Counter-trend signals now logged as "BLOCKED" for debugging
+- **Expected Impact**: Fewer losing trades during strong directional months### Added - EUR_USD Professional Trading Strategy (2025-12-10)
 - **Feature**: Created comprehensive EUR_USD trading bot based on institutional-grade research
 - **Strategy Components**:
   - **Dual-Filter EMA System**: 200 EMA trend filter + 20/50 EMA crossover signals
