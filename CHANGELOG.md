@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Scalping Strategy with 6 Price Action Patterns (2024-12-17)
+- **New File**: `ScalpingStrategy.py` - Comprehensive scalping strategy implementing 6 patterns from video course
+- **Patterns Implemented**:
+  1. **Pin Bar + Inside Bar Combo**: Reversal entries at S/D zones or swing levels
+  2. **VWAP Rejection**: Engulfing pin bar at rising/falling VWAP line
+  3. **Inside Bar Liquidity Fakeout**: False breakout → snap back entry
+  4. **Momentum Fading**: 3+ consecutive wicks showing exhaustion at key levels
+  5. **Power Candles (VSA)**: High-volume strong candles for breakout entries
+  6. **Tower Top/Bottom**: Three-phase reversal pattern with volume confirmation
+- **Custom VWAP Indicator**: Built-in VWAP that resets daily with standard deviation bands
+- **Risk Management**:
+  - 1% risk per trade with dynamic position sizing
+  - 4-consecutive-loss circuit breaker (stops trading for day)
+  - 12% max drawdown protection
+  - 5 max trades per day
+  - 1:2 Risk:Reward ratio with partial profit option
+- **Test Suite**: `test_scalping_strategy.py` with 8 scenarios covering all patterns
+- **Backtest Runner**: `run_backtest_scalping.py` with CLI pattern toggle flags
+- **Timeframe**: Optimized for 1-minute XAUUSD scalping
+- **Verification**: All patterns trigger correctly in synthetic test data
+
 ### Added - Choppy Market Improvements (2024-12-16)
 - **Problem**: Apr-Jun 2024 backtest showed 47 trades with -$84.35 P&L, 7 trades losing >$15 each
 - **Root Cause**: Trend Pullback entries getting whipsawed at EMA8 crossings
@@ -46,6 +67,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Locks in profits and prevents winners becoming losers
 
 - **Expected Impact**: Fewer trades (30-35 vs 47), lower max drawdown (<5%), higher win rate (>50%)
+
+### Changed - 2025 Profitability Tuning (2024-12-16)
+- **Problem**: Q4 2025 backtest showed overtrading (Momentum Breakout) and Q1 2025 showed missed trend entries/reversal losses.
+- **Changes**:
+  - `adx_strong_trend`: Lowered from 35 to **25** (Catch trends earlier before potential reversals)
+  - `breakeven_atr_mult`: Tightened from 1.0 to **0.7** (Lock in risk-free status sooner)
+  - `use_mean_reversion`: Defaults to **False** (Disable Momentum Breakout to stop range churn)
 
 
 ### Added - Momentum Breakout Strategy (2025-12-15)
